@@ -204,6 +204,20 @@ button {
   height: 100%;
 }
 
+.cm-image-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 0 2px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .editor-host.is-dragging-image::after {
   content: "Drop image to embed as base64";
   position: absolute;
