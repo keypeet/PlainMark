@@ -1,4 +1,4 @@
-import { RefObject, useCallback, useEffect, useMemo, useState } from 'react';
+import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bold,
   Code,
@@ -8,6 +8,7 @@ import {
   Link,
   List,
   ListChecks,
+  ListOrdered,
   Minus,
   Quote,
   Table2,
@@ -20,6 +21,7 @@ import {
   createTable,
   insertText,
   prefixLines,
+  prefixOrderedList,
   toggleHeading,
   wrapSelection
 } from '../lib/formatActions';
@@ -32,6 +34,8 @@ type ToolId =
   | 'bold'
   | 'italic'
   | 'list'
+  | 'bullet'
+  | 'ordered'
   | 'task'
   | 'quote'
   | 'table'
@@ -40,6 +44,8 @@ type ToolId =
   | 'link'
   | 'image'
   | 'hr';
+
+type PopoverKind = 'table' | 'list';
 
 interface ToolbarProps {
   editorRef: RefObject<EditorApi>;
@@ -83,19 +89,11 @@ const tools: ToolConfig[] = [
   },
   {
     id: 'list',
-    label: 'Bullet List',
+    label: 'List (เลือกชนิด)',
     shortcut: 'Ctrl+Shift+L',
-    syntax: '- item',
-    example: '- first item\n- second item',
+    syntax: '- item / 1. item / - [ ] task',
+    example: '- bullet\n\n1. numbered\n\n- [ ] task',
     icon: <List size={18} />
-  },
-  {
-    id: 'task',
-    label: 'Task List',
-    shortcut: 'Ctrl+Shift+X',
-    syntax: '- [ ] task',
-    example: '- [x] Done\n- [ ] Next',
-    icon: <ListChecks size={18} />
   },
   {
     id: 'quote',
@@ -108,10 +106,10 @@ const tools: ToolConfig[] = [
   },
   {
     id: 'table',
-    label: 'Table',
+    label: 'Table (เลือกขนาด)',
     shortcut: 'Ctrl+Shift+T',
     syntax: '| Col | Col |',
-    example: '| Name | Status |\n| --- | --- |\n| PlainMark | MVP |',
+    example: '| Name | Status |\n| --- | --- |\n| PlainMark | v0.5 |',
     icon: <Table2 size={18} />
   },
   {
@@ -157,7 +155,7 @@ const tools: ToolConfig[] = [
   }
 ];
 
-function runTool(id: ToolId, content: string, selection: { from: number; to: number }): FormatResult {
+function runTool(id: ToolId, content: string, selection: { from: number; to: number }): FormatResult | null {
   switch (id) {
     case 'heading':
       return toggleHeading(content, selection, 1);
@@ -166,7 +164,10 @@ function runTool(id: ToolId, content: string, selection: { from: number; to: num
     case 'italic':
       return wrapSelection(content, selection, '*', '*', 'italic text');
     case 'list':
+    case 'bullet':
       return prefixLines(content, selection, '- ');
+    case 'ordered':
+      return prefixOrderedList(content, selection);
     case 'task':
       return prefixLines(content, selection, '- [ ] ');
     case 'quote':
@@ -177,10 +178,16 @@ function runTool(id: ToolId, content: string, selection: { from: number; to: num
       return createCodeBlock(content, selection);
     case 'code':
       return wrapSelection(content, selection, '`', '`', 'code');
-    case 'link':
-      return createLink(content, selection);
-    case 'image':
-      return createImage(content, selection);
+    case 'link': {
+      const url = window.prompt('วางลิงก์ (URL):', 'https://');
+      if (!url || url === 'https://') return null;
+      return createLink(content, selection, url.trim());
+    }
+    case 'image': {
+      const url = window.prompt('วางลิงก์รูปภาพ (URL หรือชื่อไฟล์):', '');
+      if (!url) return null;
+      return createImage(content, selection, url.trim());
+    }
     case 'hr':
       return insertText(content, selection, '\n---\n');
   }
@@ -189,17 +196,61 @@ function runTool(id: ToolId, content: string, selection: { from: number; to: num
 export function Toolbar({ editorRef }: ToolbarProps) {
   const content = useDocStore((state) => state.content);
   const [activeTool, setActiveTool] = useState<ToolConfig | null>(null);
+  const [popover, setPopover] = useState<PopoverKind | null>(null);
+  const [popoverTop, setPopoverTop] = useState(72);
+  const [tableRows, setTableRows] = useState(3);
+  const [tableCols, setTableCols] = useState(3);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  const applyResult = useCallback(
+    (result: FormatResult | null) => {
+      const editor = editorRef.current;
+      if (!editor || !result) return;
+      editor.replaceContent(result.content, result.selectionStart, result.selectionEnd);
+      editor.focus();
+    },
+    [editorRef]
+  );
 
   const applyTool = useCallback(
     (toolId: ToolId) => {
       const editor = editorRef.current;
       if (!editor) return;
-      const result = runTool(toolId, content, editor.getSelection());
-      editor.replaceContent(result.content, result.selectionStart, result.selectionEnd);
-      editor.focus();
+      applyResult(runTool(toolId, content, editor.getSelection()));
     },
-    [content, editorRef]
+    [applyResult, content, editorRef]
   );
+
+  const insertTable = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    applyResult(createTable(content, editor.getSelection(), tableRows, tableCols));
+    setPopover(null);
+  }, [applyResult, content, editorRef, tableCols, tableRows]);
+
+  const handleToolClick = useCallback(
+    (toolId: ToolId, event: React.MouseEvent<HTMLButtonElement>) => {
+      if (toolId === 'table' || toolId === 'list') {
+        const kind: PopoverKind = toolId === 'table' ? 'table' : 'list';
+        setPopoverTop(Math.min(event.currentTarget.getBoundingClientRect().top, window.innerHeight - 220));
+        setPopover((current) => (current === kind ? null : kind));
+        return;
+      }
+      setPopover(null);
+      applyTool(toolId);
+    },
+    [applyTool]
+  );
+
+  // ปิด popover เมื่อคลิกที่อื่น
+  useEffect(() => {
+    if (!popover) return;
+    const handler = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) setPopover(null);
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [popover]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -212,7 +263,8 @@ export function Toolbar({ editorRef }: ToolbarProps) {
         i: !shifted ? 'italic' : shifted ? 'image' : undefined,
         e: !shifted ? 'code' : undefined,
         k: !shifted ? 'link' : undefined,
-        l: shifted ? 'list' : undefined,
+        l: shifted ? 'bullet' : undefined,
+        o: shifted ? 'ordered' : undefined,
         x: shifted ? 'task' : undefined,
         q: shifted ? 'quote' : undefined,
         t: shifted ? 'table' : undefined,
@@ -239,7 +291,7 @@ export function Toolbar({ editorRef }: ToolbarProps) {
             className="tool-button"
             aria-label={tool.label}
             title={tool.label}
-            onClick={() => applyTool(tool.id)}
+            onClick={(event) => handleToolClick(tool.id, event)}
             onFocus={() => setActiveTool(tool)}
             onBlur={() => setActiveTool(null)}
             onMouseEnter={() => setActiveTool(tool)}
@@ -251,7 +303,7 @@ export function Toolbar({ editorRef }: ToolbarProps) {
         </div>
       ))}
 
-      {activeTool && (
+      {activeTool && !popover && (
         <div className="tool-tip">
           <div className="tip-head">
             <strong>{activeTool.label}</strong>
@@ -260,6 +312,68 @@ export function Toolbar({ editorRef }: ToolbarProps) {
           <div className="tip-label">Preview</div>
           <div className="tip-preview markdown-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
           <div className="tip-code">{activeTool.syntax}</div>
+        </div>
+      )}
+
+      {popover === 'table' && (
+        <div className="tool-popover" ref={popoverRef} style={{ top: popoverTop }}>
+          <div className="popover-title">แทรกตาราง</div>
+          <label className="popover-field">
+            แถว
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={tableRows}
+              onChange={(event) => setTableRows(Number(event.target.value))}
+            />
+          </label>
+          <label className="popover-field">
+            คอลัมน์
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={tableCols}
+              onChange={(event) => setTableCols(Number(event.target.value))}
+            />
+          </label>
+          <button className="popover-confirm" onClick={insertTable}>
+            แทรกตาราง {tableRows} × {tableCols}
+          </button>
+        </div>
+      )}
+
+      {popover === 'list' && (
+        <div className="tool-popover" ref={popoverRef} style={{ top: popoverTop }}>
+          <div className="popover-title">เลือกชนิดลิสต์</div>
+          <button
+            className="popover-option"
+            onClick={() => {
+              applyTool('bullet');
+              setPopover(null);
+            }}
+          >
+            <List size={15} /> จุดวงกลม (- )
+          </button>
+          <button
+            className="popover-option"
+            onClick={() => {
+              applyTool('ordered');
+              setPopover(null);
+            }}
+          >
+            <ListOrdered size={15} /> ตัวเลข (1. )
+          </button>
+          <button
+            className="popover-option"
+            onClick={() => {
+              applyTool('task');
+              setPopover(null);
+            }}
+          >
+            <ListChecks size={15} /> เช็คลิสต์ (- [ ] )
+          </button>
         </div>
       )}
     </aside>

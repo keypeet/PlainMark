@@ -523,6 +523,79 @@ button {
   font-size: 12.5px;
 }
 
+.tool-popover {
+  position: fixed;
+  right: 70px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 210px;
+  padding: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.popover-title {
+  color: var(--text-soft);
+  font-size: 11px;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.popover-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.popover-field input {
+  width: 72px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.popover-confirm {
+  height: 32px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.popover-confirm:hover {
+  filter: brightness(1.05);
+}
+
+.popover-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+
+.popover-option:hover {
+  background: var(--accent-soft);
+}
+
 .statusbar {
   display: flex;
   align-items: center;

@@ -3,6 +3,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { insertReferenceLink, longUrlThreshold } from '../lib/formatActions';
 import { embedImageReference, isImageFile, readImageAsDataUrl } from '../lib/imagePaste';
 import { useDocStore } from '../store/docStore';
 import type { EditorApi } from '../types';
@@ -79,6 +80,10 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
         '.cm-activeLineGutter, .cm-activeLine': {
           backgroundColor: 'var(--active-line)'
         },
+        '.cm-cursor, .cm-dropCursor': {
+          borderLeftColor: 'var(--text)',
+          borderLeftWidth: '2px'
+        },
         '.cm-focused': {
           outline: 'none'
         }
@@ -107,21 +112,47 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
     const root = containerRef.current;
     if (!root) return;
 
+    const imageUrlPattern = /\.(png|jpe?g|gif|webp|svg|bmp|ico)(\?\S*)?$/i;
+
     const handlePaste = async (event: ClipboardEvent) => {
+      const view = viewRef.current;
+      if (!view) return;
+
       const item = Array.from(event.clipboardData?.items ?? []).find((clipboardItem) =>
         clipboardItem.type.startsWith('image/')
       );
       const file = item?.getAsFile();
-      const view = viewRef.current;
-      if (!file || !view) return;
-      event.preventDefault();
-      const dataUrl = await readImageAsDataUrl(file);
-      const result = embedImageReference(view.state.doc.toString(), view.state.selection.main.from, dataUrl);
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: result.content },
-        selection: { anchor: result.selectionStart },
-        scrollIntoView: true
-      });
+      if (file) {
+        event.preventDefault();
+        const dataUrl = await readImageAsDataUrl(file);
+        const result = embedImageReference(view.state.doc.toString(), view.state.selection.main.from, dataUrl);
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: result.content },
+          selection: { anchor: result.selectionStart },
+          scrollIntoView: true
+        });
+        return;
+      }
+
+      // วาง URL ยาวเดี่ยวๆ → ย่อเป็น reference-style อัตโนมัติ ไม่ให้รก editor
+      const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
+      const isBareUrl = /^https?:\/\/\S+$/.test(text);
+      if (isBareUrl && text.length > longUrlThreshold) {
+        event.preventDefault();
+        const selection = view.state.selection.main;
+        const kind = imageUrlPattern.test(text) ? 'image' : 'link';
+        const result = insertReferenceLink(
+          view.state.doc.toString(),
+          { from: selection.from, to: selection.to },
+          text,
+          kind
+        );
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: result.content },
+          selection: { anchor: result.selectionStart },
+          scrollIntoView: true
+        });
+      }
     };
 
     const handleDragOver = (event: DragEvent) => {
