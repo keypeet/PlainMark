@@ -680,6 +680,35 @@ button {
   flex-shrink: 0;
 }
 
+.status-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.status-zoom button {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-soft);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.status-zoom button:hover {
+  color: var(--text);
+  background: rgba(128, 128, 128, 0.16);
+}
+
+.status-zoom-value {
+  min-width: 40px;
+}
+
 .status-saved {
   color: var(--success);
 }

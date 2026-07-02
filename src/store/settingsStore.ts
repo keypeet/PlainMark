@@ -10,15 +10,22 @@ interface SettingsState {
   sidebarOpen: boolean;
   // โฟลเดอร์หลักที่เก็บโน้ต — null = ค่าเริ่มต้น (Documents\PlainMark)
   notesRoot: string | null;
+  zoom: number;
   setLayout: (layout: LayoutMode) => void;
   setTheme: (theme: ThemeMode) => void;
   toggleLineNumbers: () => void;
   toggleSidebar: () => void;
   addRecentFile: (path: string) => void;
   setNotesRoot: (path: string | null) => void;
+  setZoom: (zoom: number) => void;
 }
 
 const recentLimit = 8;
+
+// ระดับซูมของทั้งแอป — จำกัด 50%–250% กันเผลอซูมจนใช้งานไม่ได้
+export function clampZoom(zoom: number): number {
+  return Math.min(2.5, Math.max(0.5, Math.round(zoom * 100) / 100));
+}
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -29,6 +36,7 @@ export const useSettingsStore = create<SettingsState>()(
       recentFiles: [],
       sidebarOpen: true,
       notesRoot: null,
+      zoom: 1,
       setLayout: (layout) => set({ layout }),
       setTheme: (theme) => set({ theme }),
       toggleLineNumbers: () => set((state) => ({ showLineNumbers: !state.showLineNumbers })),
@@ -37,7 +45,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({
           recentFiles: [path, ...state.recentFiles.filter((item) => item !== path)].slice(0, recentLimit)
         })),
-      setNotesRoot: (path) => set({ notesRoot: path })
+      setNotesRoot: (path) => set({ notesRoot: path }),
+      setZoom: (zoom) => set({ zoom: clampZoom(zoom) })
     }),
     {
       name: 'plainmark:settings',
@@ -48,7 +57,8 @@ export const useSettingsStore = create<SettingsState>()(
         showLineNumbers: state.showLineNumbers,
         recentFiles: state.recentFiles,
         sidebarOpen: state.sidebarOpen,
-        notesRoot: state.notesRoot
+        notesRoot: state.notesRoot,
+        zoom: state.zoom
       })
     }
   )

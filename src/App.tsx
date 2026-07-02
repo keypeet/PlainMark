@@ -66,7 +66,7 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const { content, file, notePath, dirty, setContent, setFile, setNotePath, markSaved, newDocument, hydrate } =
     useDocStore();
-  const { layout, theme, sidebarOpen, setLayout, setTheme, toggleSidebar, addRecentFile } = useSettingsStore();
+  const { layout, theme, sidebarOpen, zoom, setLayout, setTheme, toggleSidebar, addRecentFile } = useSettingsStore();
   const html = useRenderedMarkdown(content);
 
   const visible = useMemo(
@@ -157,6 +157,37 @@ export default function App() {
     setTheme(nextTheme);
   }, [setTheme, theme]);
 
+  // ซูมทั้งแอป — delta เป็นขั้น ±0.1, null = รีเซ็ตกลับ 100%
+  const changeZoom = useCallback(
+    (delta: number | null) => {
+      const { zoom: current, setZoom } = useSettingsStore.getState();
+      const next = delta === null ? 1 : current + delta;
+      setZoom(next);
+      showNotice(`ซูม ${Math.round(useSettingsStore.getState().zoom * 100)}%`);
+    },
+    [showNotice]
+  );
+
+  // ปรับซูมจริงผ่าน webview ทุกครั้งที่ค่าเปลี่ยน (รวมตอนเปิดแอป — คืนค่าที่จำไว้)
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    (async () => {
+      const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+      await getCurrentWebview().setZoom(zoom);
+    })().catch((error) => console.error('PlainMark: set zoom failed', error));
+  }, [zoom]);
+
+  // Ctrl + ลูกกลิ้งเมาส์ = ซูมเข้า/ออก
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      changeZoom(event.deltaY < 0 ? 0.1 : -0.1);
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [changeZoom]);
+
   // กู้คืน session เงียบๆ ตอนเปิดแอป (แบบ Notepad — ไม่ถาม ไม่มีทางหาย)
   useEffect(() => {
     let cancelled = false;
@@ -236,10 +267,22 @@ export default function App() {
         event.preventDefault();
         handleNew();
       }
+      if (key === '=' || key === '+') {
+        event.preventDefault();
+        changeZoom(0.1);
+      }
+      if (key === '-') {
+        event.preventDefault();
+        changeZoom(-0.1);
+      }
+      if (key === '0') {
+        event.preventDefault();
+        changeZoom(null);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleNew, handleOpen, handleSave]);
+  }, [changeZoom, handleNew, handleOpen, handleSave]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
