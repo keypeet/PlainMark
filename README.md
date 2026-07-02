@@ -41,6 +41,11 @@ npm run tauri:build
 - `src-tauri/target/release/bundle/nsis/PlainMark_x.x.x_x64-setup.exe`
 - `src-tauri/target/release/bundle/msi/PlainMark_x.x.x_x64_en-US.msi`
 
+> **หมายเหตุถ้าโปรเจกต์อยู่ใน OneDrive:** OneDrive อาจ lock ไฟล์ระหว่าง cargo build ทำให้ build ล้มเหลว
+> แก้โดยตั้ง `CARGO_TARGET_DIR` ชี้ออกนอก OneDrive เช่น
+> `setx CARGO_TARGET_DIR "%LOCALAPPDATA%\plainmark-cargo-target"`
+> (ไฟล์ bundle จะไปอยู่ใต้โฟลเดอร์นั้นแทน `src-tauri/target`)
+
 ## Development
 
 ```bash
