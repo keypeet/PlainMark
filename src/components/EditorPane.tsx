@@ -70,7 +70,8 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
           fontFamily: 'var(--mono)',
           fontSize: '13.5px',
           lineHeight: '1.7',
-          padding: '14px 16px'
+          padding: '14px 16px',
+          caretColor: 'var(--text)'
         },
         '.cm-gutters': {
           backgroundColor: 'var(--bg-soft)',
