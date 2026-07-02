@@ -2,7 +2,7 @@
 
 Simple Markdown Note Editor: พิมพ์ง่ายเหมือน Notepad พร้อม Markdown Preview แบบเรียลไทม์
 
-**เวอร์ชันล่าสุด: 0.7.0**
+**เวอร์ชันล่าสุด: 0.8.0**
 
 > **งานของคุณไม่มีวันหาย** — ทุกอย่างที่พิมพ์ถูกบันทึกอัตโนมัติเสมอ ปิดแอปด้วยกากบาทได้เลย เปิดใหม่ทุกอย่างยังอยู่เหมือนเดิม ทำงานแบบ offline 100%
 
@@ -18,6 +18,16 @@ Simple Markdown Note Editor: พิมพ์ง่ายเหมือน Notep
 
 - **Editor + Live Preview** — CodeMirror 6 + markdown-it + highlight.js (sanitize ด้วย DOMPurify)
 - **Toolbar จัดรูปแบบ** — Heading, Bold, Italic, Table, Code Block, Link, Image, List ฯลฯ ไม่ต้องจำ syntax
+- **Slash Command** — พิมพ์ `/` แล้วเลือกคำสั่ง (Heading, Table, Quote, Image, Code, Todo, Link ฯลฯ)
+  ค้นหาแบบ fuzzy ได้ทั้งอังกฤษและไทย เช่น `/ตาราง` — เพิ่มทุกอย่างได้โดยไม่ต้องแตะเมาส์
+- **Smart Auto-format** — กด Enter ท้ายบรรทัด list/checklist/quote แล้วต่อ marker ให้เอง
+  (ordered list นับเลขต่อให้) กด Enter บนรายการว่างเพื่อออกจาก list, พิมพ์ `[]` + space = เช็คบ็อกซ์
+- **Paste Anything** — วางจาก Word / Excel / เว็บ แล้วแปลงเป็น Markdown อัตโนมัติ
+  (ตาราง Excel → Markdown Table, ลิงก์/หัวข้อ/ตัวหนา คงรูปแบบครบ)
+- **Floating Toolbar** — เลือกข้อความแล้วแถบ Bold / Italic / Link / Code / H1 ลอยขึ้นเหนือ selection
+- **Hover Preview** — ชี้เมาส์ค้างบน Markdown ใน editor (รูป ตาราง ลิงก์ โค้ด quote) เห็นผลจริงตรงจุดนั้น
+- **Auto Detect Content ใน Preview** — ย่อหน้าที่มีแค่ลิงก์เดียวแสดงเป็น card สวยๆ โดยไม่แก้ Markdown:
+  YouTube → Video Card (มี thumbnail), GitHub repo → Repository Card, `.pdf` → File Card, อีเมล → Mail Card
 - **กลุ่มโน้ต (แผงด้านขวา)** — โน้ตใหม่เข้ากลุ่มรายวันอัตโนมัติ หรือสร้างกลุ่มตั้งชื่อเอง เปลี่ยนชื่อ/ย้าย/ลบได้
   เก็บเป็นไฟล์ `.md` จริงใน `<โฟลเดอร์เก็บโน้ต>\<ชื่อกลุ่ม>\` เปิดด้วยโปรแกรมอื่นหรือสำรองได้ทันที
 - **เลือกโฟลเดอร์เก็บโน้ตเองได้** — ค่าเริ่มต้นคือ `Documents\PlainMark` กดปุ่มโฟลเดอร์ท้ายแผงโน้ตเพื่อเปลี่ยน
@@ -87,3 +97,6 @@ push tag รูปแบบ `v*` (เช่น `v0.1.0`) → workflow `Release` 
 | `Ctrl+=` / `Ctrl+-` | ซูมเข้า / ซูมออก |
 | `Ctrl+0` | รีเซ็ตซูม 100% |
 | `Ctrl` + ลูกกลิ้งเมาส์ | ซูมเข้า/ออก |
+| `/` (ต้นบรรทัด) | เปิดเมนู Slash Command |
+| `Enter` ท้ายบรรทัด list | ต่อ list อัตโนมัติ (กดบนรายการว่าง = ออกจาก list) |
+| `[]` + `Space` | สร้างเช็คบ็อกซ์ `- [ ]` |

@@ -15,8 +15,13 @@ import {
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { insertReferenceLink, longUrlThreshold } from '../lib/formatActions';
 import { embedImageReference, isImageFile, readImageAsDataUrl } from '../lib/imagePaste';
+import { convertClipboardHtml } from '../lib/pasteConvert';
 import { useDocStore } from '../store/docStore';
 import type { EditorApi } from '../types';
+import { floatingToolbar } from './editor/floatingToolbar';
+import { hoverPreview } from './editor/hoverPreview';
+import { slashMenu } from './editor/slashMenu';
+import { smartFormatExtension } from './editor/smartFormatExtension';
 
 function getCursorPosition(content: string, offset: number) {
   const before = content.slice(0, offset);
@@ -113,9 +118,13 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
       lineNumbers(),
       history(),
       markdown(),
+      smartFormatExtension(), // ต้องมาก่อน defaultKeymap เพื่อดัก Enter/Space บนบรรทัด list
       keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
       EditorView.lineWrapping,
       collapseDataUrls,
+      slashMenu(),
+      floatingToolbar(),
+      hoverPreview(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           setContent(update.state.doc.toString());
@@ -200,9 +209,28 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
         return;
       }
 
-      // วาง URL ยาวเดี่ยวๆ → ย่อเป็น reference-style อัตโนมัติ ไม่ให้รก editor
       const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
       const isBareUrl = /^https?:\/\/\S+$/.test(text);
+
+      // Paste Anything: HTML จาก Word/Excel/เว็บ → แปลงเป็น Markdown (ตาราง Excel → Markdown Table)
+      // ยกเว้น URL เปล่า — ให้ตกไปเข้ากติกาย่อลิงก์ด้านล่างแทน
+      if (!isBareUrl) {
+        const html = event.clipboardData?.getData('text/html');
+        const markdownFromHtml = convertClipboardHtml(html);
+        if (markdownFromHtml) {
+          event.preventDefault();
+          const selection = view.state.selection.main;
+          view.dispatch({
+            changes: { from: selection.from, to: selection.to, insert: markdownFromHtml },
+            selection: { anchor: selection.from + markdownFromHtml.length },
+            scrollIntoView: true,
+            userEvent: 'input.paste'
+          });
+          return;
+        }
+      }
+
+      // วาง URL ยาวเดี่ยวๆ → ย่อเป็น reference-style อัตโนมัติ ไม่ให้รก editor
       if (isBareUrl && text.length > longUrlThreshold) {
         event.preventDefault();
         const selection = view.state.selection.main;

@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
+import { contentCardsPlugin } from './contentCards';
 
 const markdown = new MarkdownIt({
   html: false,
@@ -18,7 +19,10 @@ const markdown = new MarkdownIt({
     }
     return hljs.highlightAuto(code).value;
   }
-}).use(taskLists, { enabled: false, label: true, labelAfter: true });
+})
+  .use(taskLists, { enabled: false, label: true, labelAfter: true })
+  // ย่อหน้าที่มีแค่ลิงก์เดียว (YouTube/GitHub/PDF/Email) → แสดงเป็น card โดยไม่แตะ Markdown ต้นฉบับ
+  .use(contentCardsPlugin);
 
 const allowedUriRegexp =
   /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:image\/(?:png|gif|jpe?g|webp|svg\+xml);base64,)/i;

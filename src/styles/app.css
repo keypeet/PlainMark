@@ -779,3 +779,105 @@ button {
     width: min(260px, calc(100vw - 76px));
   }
 }
+
+/* ---------- Advanced features (v0.8.0) ---------- */
+
+/* Floating Toolbar — แถบลอยเหนือข้อความที่เลือก */
+.cm-tooltip:has(> .cm-floating-toolbar) {
+  border: none;
+  background: transparent;
+}
+
+.cm-floating-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.floating-tool {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.floating-tool:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.floating-tool-bold {
+  font-weight: 700;
+}
+
+.floating-tool-italic {
+  font-style: italic;
+}
+
+.floating-tool-code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* Hover Preview — แสดงผลจริงของ block ใต้เมาส์ */
+.cm-tooltip:has(> .cm-hover-preview) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cm-hover-preview {
+  max-width: min(440px, 70vw);
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 14px;
+  font-family: var(--sans);
+  font-size: 13px;
+}
+
+.cm-hover-preview img {
+  max-height: 220px;
+}
+
+/* Slash Command menu — แต่ง autocomplete ของ CodeMirror ให้เข้าธีม */
+.cm-tooltip.cm-tooltip-autocomplete {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cm-tooltip-autocomplete > ul {
+  font-family: var(--sans);
+  font-size: 13px;
+  max-height: 260px;
+}
+
+.cm-tooltip-autocomplete > ul > li {
+  padding: 6px 10px;
+  color: var(--text);
+}
+
+.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cm-tooltip-autocomplete .cm-completionDetail {
+  margin-left: 10px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-soft);
+}
