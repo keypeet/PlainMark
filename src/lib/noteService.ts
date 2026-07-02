@@ -10,6 +10,8 @@ export interface GroupMeta {
   notes: NoteMeta[];
 }
 
+import { useSettingsStore } from '../store/settingsStore';
+
 export const notesSupported = '__TAURI_INTERNALS__' in window;
 
 const noteExtension = '.md';
@@ -23,9 +25,15 @@ async function fsApi() {
   return { path, fs };
 }
 
-export async function notesRootDir(): Promise<string> {
+export async function defaultNotesRootDir(): Promise<string> {
   const { path } = await fsApi();
   return path.join(await path.documentDir(), rootFolderName);
+}
+
+// root ที่ใช้จริง — ผู้ใช้เลือกเองได้ในตั้งค่า ไม่เลือกก็ใช้ Documents\PlainMark
+export async function notesRootDir(): Promise<string> {
+  const custom = useSettingsStore.getState().notesRoot;
+  return custom ?? defaultNotesRootDir();
 }
 
 export async function ensureNotesRoot(): Promise<string> {
@@ -211,4 +219,26 @@ export async function deleteNote(notePath: string): Promise<void> {
 export async function deleteGroup(groupPath: string): Promise<void> {
   const { fs } = await fsApi();
   await fs.remove(groupPath, { recursive: true });
+}
+
+// ย้ายโฟลเดอร์กลุ่มทั้งหมดจาก root เดิมไป root ใหม่ คืนรายชื่อกลุ่มที่ย้ายไม่สำเร็จ
+// (rename ข้ามไดรฟ์อาจล้มเหลว — ผู้ใช้ต้องย้ายเองด้วย File Explorer)
+export async function migrateNotesRoot(oldRoot: string, newRoot: string): Promise<string[]> {
+  const { path, fs } = await fsApi();
+  const failures: string[] = [];
+  if (oldRoot === newRoot || !(await fs.exists(oldRoot))) return failures;
+  await fs.mkdir(newRoot, { recursive: true });
+  await flushNoteWrites();
+  for (const entry of await fs.readDir(oldRoot)) {
+    if (!entry.isDirectory) continue;
+    try {
+      const from = await path.join(oldRoot, entry.name);
+      const to = await path.join(newRoot, entry.name);
+      if (await fs.exists(to)) throw new Error('duplicate');
+      await fs.rename(from, to);
+    } catch {
+      failures.push(entry.name);
+    }
+  }
+  return failures;
 }

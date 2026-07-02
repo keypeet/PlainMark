@@ -392,6 +392,48 @@ button {
   color: var(--text-soft);
   font-size: 12.5px;
   line-height: 1.6;
+  word-break: break-all;
+}
+
+.notes-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+}
+
+.notes-root {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-soft);
+  background: transparent;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.notes-root:hover {
+  color: var(--text);
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.notes-root svg {
+  flex-shrink: 0;
+}
+
+.notes-root-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* ตัดหัว path ให้เห็นชื่อโฟลเดอร์ท้ายสุดเสมอ */
+  text-align: left;
 }
 
 .notes-group {

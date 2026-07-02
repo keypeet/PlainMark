@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, FolderInput, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
-import { notesSupported, todayGroupName } from '../lib/noteService';
+import { ChevronDown, ChevronRight, FolderCog, FolderInput, FolderPlus, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { defaultNotesRootDir, migrateNotesRoot, notesRootDir, notesSupported, todayGroupName } from '../lib/noteService';
 import type { NoteMeta } from '../lib/noteService';
 import { useDocStore } from '../store/docStore';
 import { useNotesStore } from '../store/notesStore';
+import { useSettingsStore } from '../store/settingsStore';
 
 interface NotesSidebarProps {
   onOpenNote: (note: NoteMeta) => void;
@@ -14,6 +15,8 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
   const { groups, loaded, refresh, addGroup, renameNoteAt, renameGroupAt, moveNoteTo, removeNote, removeGroup } =
     useNotesStore();
   const activeNotePath = useDocStore((state) => state.notePath);
+  const notesRoot = useSettingsStore((state) => state.notesRoot);
+  const [rootDir, setRootDir] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [movingNote, setMovingNote] = useState<string | null>(null);
   const [dragNote, setDragNote] = useState<{ note: NoteMeta; fromGroup: string } | null>(null);
@@ -22,6 +25,11 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!notesSupported) return;
+    void notesRootDir().then(setRootDir);
+  }, [notesRoot]);
 
   if (!notesSupported) {
     return (
@@ -44,6 +52,46 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
   const handleAddGroup = () => {
     const name = window.prompt('ตั้งชื่อกลุ่มใหม่:');
     if (name?.trim()) void addGroup(name);
+  };
+
+  // เปลี่ยนโฟลเดอร์หลักที่เก็บโน้ต (target = null → กลับไปใช้ค่าเริ่มต้น Documents\PlainMark)
+  const applyNotesRoot = async (target: string | null) => {
+    const oldRoot = await notesRootDir();
+    const newRoot = target ?? (await defaultNotesRootDir());
+    if (newRoot !== oldRoot) {
+      const migrate = window.confirm(
+        `เปลี่ยนโฟลเดอร์เก็บโน้ตเป็น:\n${newRoot}\n\n` +
+          'ต้องการย้ายโน้ตเดิมทั้งหมดไปโฟลเดอร์ใหม่ด้วยหรือไม่?\n' +
+          '(Cancel = เปลี่ยนเฉพาะโฟลเดอร์ โน้ตเดิมยังอยู่ที่เดิม)'
+      );
+      useSettingsStore.getState().setNotesRoot(target);
+      if (migrate) {
+        const failures = await migrateNotesRoot(oldRoot, newRoot);
+        const doc = useDocStore.getState();
+        if (doc.notePath?.startsWith(oldRoot)) {
+          const rel = doc.notePath.slice(oldRoot.length).replace(/^[\\/]+/, '');
+          const groupName = rel.split(/[\\/]/)[0];
+          if (!failures.includes(groupName)) {
+            const movedPath = `${newRoot.replace(/[\\/]+$/, '')}\\${rel}`;
+            doc.setNotePath(movedPath);
+            doc.setFile({ path: movedPath, name: doc.file.name });
+          }
+        }
+        if (failures.length > 0) {
+          window.alert(`ย้ายบางกลุ่มไม่สำเร็จ: ${failures.join(', ')}\nกรุณาย้ายเองด้วย File Explorer`);
+        }
+      }
+    } else {
+      useSettingsStore.getState().setNotesRoot(target);
+    }
+    await refresh();
+  };
+
+  const handleChangeRoot = async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const picked = await open({ directory: true, title: 'เลือกโฟลเดอร์เก็บโน้ต', defaultPath: rootDir || undefined });
+    if (typeof picked !== 'string' || !picked) return;
+    await applyNotesRoot(picked);
   };
 
   const handleRenameGroup = (groupPath: string, current: string) => {
@@ -112,7 +160,7 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
           <p className="notes-empty">
             ยังไม่มีโน้ต — กด + เพื่อสร้างโน้ตแรก
             <br />
-            (เก็บใน Documents\PlainMark)
+            (เก็บใน {rootDir || 'Documents\\PlainMark'})
           </p>
         )}
 
@@ -230,6 +278,26 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
             </section>
           );
         })}
+      </div>
+
+      <div className="notes-foot">
+        <button
+          className="notes-root"
+          title={`โฟลเดอร์เก็บโน้ต:\n${rootDir}\n(คลิกเพื่อเปลี่ยน)`}
+          onClick={() => void handleChangeRoot()}
+        >
+          <FolderCog size={14} />
+          <span className="notes-root-path">{rootDir || '…'}</span>
+        </button>
+        {notesRoot && (
+          <button
+            className="notes-action"
+            title="กลับไปใช้โฟลเดอร์เริ่มต้น (Documents\PlainMark)"
+            onClick={() => void applyNotesRoot(null)}
+          >
+            <RotateCcw size={13} />
+          </button>
+        )}
       </div>
     </aside>
   );

@@ -8,11 +8,14 @@ interface SettingsState {
   showLineNumbers: boolean;
   recentFiles: string[];
   sidebarOpen: boolean;
+  // โฟลเดอร์หลักที่เก็บโน้ต — null = ค่าเริ่มต้น (Documents\PlainMark)
+  notesRoot: string | null;
   setLayout: (layout: LayoutMode) => void;
   setTheme: (theme: ThemeMode) => void;
   toggleLineNumbers: () => void;
   toggleSidebar: () => void;
   addRecentFile: (path: string) => void;
+  setNotesRoot: (path: string | null) => void;
 }
 
 const recentLimit = 8;
@@ -25,6 +28,7 @@ export const useSettingsStore = create<SettingsState>()(
       showLineNumbers: true,
       recentFiles: [],
       sidebarOpen: true,
+      notesRoot: null,
       setLayout: (layout) => set({ layout }),
       setTheme: (theme) => set({ theme }),
       toggleLineNumbers: () => set((state) => ({ showLineNumbers: !state.showLineNumbers })),
@@ -32,7 +36,8 @@ export const useSettingsStore = create<SettingsState>()(
       addRecentFile: (path) =>
         set((state) => ({
           recentFiles: [path, ...state.recentFiles.filter((item) => item !== path)].slice(0, recentLimit)
-        }))
+        })),
+      setNotesRoot: (path) => set({ notesRoot: path })
     }),
     {
       name: 'plainmark:settings',
@@ -42,7 +47,8 @@ export const useSettingsStore = create<SettingsState>()(
         theme: state.theme,
         showLineNumbers: state.showLineNumbers,
         recentFiles: state.recentFiles,
-        sidebarOpen: state.sidebarOpen
+        sidebarOpen: state.sidebarOpen,
+        notesRoot: state.notesRoot
       })
     }
   )
