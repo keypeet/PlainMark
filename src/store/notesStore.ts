@@ -16,6 +16,9 @@ import type { NoteMeta } from '../lib/noteService';
 interface NotesState {
   groups: GroupMeta[];
   loaded: boolean;
+  // กลุ่มที่ผู้ใช้เลือกล่าสุด (คลิกหัวกลุ่ม หรือเปิดโน้ตในกลุ่มนั้น) — เป็นปลายทางของปุ่ม New
+  selectedGroup: string | null;
+  selectGroup: (name: string | null) => void;
   refresh: () => Promise<void>;
   addGroup: (name: string) => Promise<void>;
   addNote: (groupName?: string, title?: string) => Promise<NoteMeta | null>;
@@ -29,6 +32,9 @@ interface NotesState {
 export const useNotesStore = create<NotesState>((set, get) => ({
   groups: [],
   loaded: false,
+  selectedGroup: null,
+
+  selectGroup: (name) => set({ selectedGroup: name }),
 
   refresh: async () => {
     if (!notesSupported) {
@@ -36,7 +42,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       return;
     }
     try {
-      set({ groups: await loadTree(), loaded: true });
+      const groups = await loadTree();
+      // กลุ่มที่เลือกไว้ถูกลบ/เปลี่ยนชื่อไปแล้ว → ล้างการเลือก (ปุ่ม New จะ fallback ตามลำดับปกติ)
+      set((state) => ({
+        groups,
+        loaded: true,
+        selectedGroup:
+          state.selectedGroup && groups.some((group) => group.name === state.selectedGroup)
+            ? state.selectedGroup
+            : null
+      }));
     } catch (error) {
       console.error('PlainMark: load notes tree failed', error);
       set({ loaded: true });
@@ -71,7 +86,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   renameGroupAt: async (groupPath, newName) => {
-    await renameGroup(groupPath, newName);
+    const oldName = groupPath.split(/[\\/]/).filter(Boolean).pop();
+    const newPath = await renameGroup(groupPath, newName);
+    // ถ้ากลุ่มที่เลือกอยู่คือกลุ่มที่ถูกเปลี่ยนชื่อ ให้การเลือกตามไปชื่อใหม่
+    if (get().selectedGroup === oldName) {
+      set({ selectedGroup: newPath.split(/[\\/]/).filter(Boolean).pop() ?? null });
+    }
     await get().refresh();
   },
 

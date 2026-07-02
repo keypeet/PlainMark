@@ -43,6 +43,12 @@ export async function ensureNotesRoot(): Promise<string> {
   return root;
 }
 
+// ชื่อกลุ่มของโน้ต = ชื่อโฟลเดอร์แม่ของไฟล์ (โครงสร้าง root\กลุ่ม\ชื่อโน้ต.md)
+export function noteGroupName(notePath: string): string | null {
+  const segments = notePath.split(/[\\/]/).filter(Boolean);
+  return segments.length >= 2 ? segments[segments.length - 2] : null;
+}
+
 export function todayGroupName(now: Date = new Date()): string {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');

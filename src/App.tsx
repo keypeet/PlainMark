@@ -18,7 +18,7 @@ import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
 import { renderMarkdown } from './lib/markdownEngine';
 import { flushSession, loadSession, saveSession } from './lib/session';
-import { flushNoteWrites, readNote, writeNoteQueued } from './lib/noteService';
+import { flushNoteWrites, noteGroupName, notesSupported, readNote, writeNoteQueued } from './lib/noteService';
 import type { NoteMeta } from './lib/noteService';
 import { exportTextFile, openTextFile, saveTextFile } from './lib/fileService';
 import { useDocStore } from './store/docStore';
@@ -91,6 +91,8 @@ export default function App() {
         setFile({ path: note.path, name: `${note.name}.md` });
         setNotePath(note.path);
         markSaved(noteContent);
+        // การเลือกกลุ่มตามโน้ตที่เปิด — ปุ่ม New จะได้สร้างเข้ากลุ่มนี้
+        useNotesStore.getState().selectGroup(noteGroupName(note.path));
         editorRef.current?.focus();
       } catch (error) {
         console.error('PlainMark: open note failed', error);
@@ -112,9 +114,15 @@ export default function App() {
   const handleNew = useCallback(() => {
     // งานในโน้ตถูกบันทึกออโต้อยู่แล้ว — เตือนเฉพาะไฟล์ภายนอกที่ยังไม่ save
     if (!notePath && dirty && !window.confirm('มีงานที่ยังไม่บันทึก ต้องการสร้างไฟล์ใหม่หรือไม่?')) return;
+    // สร้างเป็นโน้ตในกลุ่มที่เลือกอยู่ (คลิกหัวกลุ่ม/เปิดโน้ต) → กลุ่มของโน้ตที่เปิด → กลุ่มวันนี้
+    if (notesSupported) {
+      const { selectedGroup } = useNotesStore.getState();
+      void createNote(selectedGroup ?? ((notePath && noteGroupName(notePath)) || undefined));
+      return;
+    }
     newDocument();
     editorRef.current?.focus();
-  }, [dirty, newDocument, notePath]);
+  }, [createNote, dirty, newDocument, notePath]);
 
   const handleOpen = useCallback(async () => {
     if (!notePath && dirty && !window.confirm('มีงานที่ยังไม่บันทึก ต้องการเปิดไฟล์อื่นหรือไม่?')) return;

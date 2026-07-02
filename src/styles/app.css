@@ -447,6 +447,16 @@ button {
   background: var(--accent-soft);
 }
 
+/* กลุ่มที่เลือกอยู่ = ปลายทางของปุ่ม New */
+.notes-group.selected > .notes-group-row {
+  background: var(--accent-soft);
+}
+
+.notes-group.selected > .notes-group-row .notes-group-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .notes-item[draggable] {
   cursor: grab;
 }

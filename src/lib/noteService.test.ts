@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeName, todayGroupName } from './noteService';
+import { noteGroupName, sanitizeName, todayGroupName } from './noteService';
 
 describe('sanitizeName', () => {
   it('strips characters Windows forbids in filenames', () => {
@@ -21,6 +21,18 @@ describe('sanitizeName', () => {
 
   it('keeps Thai names intact', () => {
     expect(sanitizeName('งานบริษัท')).toBe('งานบริษัท');
+  });
+});
+
+describe('noteGroupName', () => {
+  it('คืนชื่อโฟลเดอร์แม่ของโน้ต (กลุ่ม)', () => {
+    expect(noteGroupName('C:\\Users\\x\\Documents\\PlainMark\\งานบริษัท\\โน้ตใหม่.md')).toBe('งานบริษัท');
+    expect(noteGroupName('C:\\Users\\x\\Documents\\PlainMark\\2026-07-03\\meeting.md')).toBe('2026-07-03');
+    expect(noteGroupName('/home/x/notes/กลุ่มA/note.md')).toBe('กลุ่มA');
+  });
+
+  it('path สั้นเกินกว่าจะมีกลุ่ม → null', () => {
+    expect(noteGroupName('note.md')).toBeNull();
   });
 });
 

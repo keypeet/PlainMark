@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, FolderCog, FolderInput, FolderPlus, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { defaultNotesRootDir, migrateNotesRoot, notesRootDir, notesSupported, todayGroupName } from '../lib/noteService';
+import {
+  defaultNotesRootDir,
+  migrateNotesRoot,
+  noteGroupName,
+  notesRootDir,
+  notesSupported,
+  todayGroupName
+} from '../lib/noteService';
 import type { NoteMeta } from '../lib/noteService';
 import { useDocStore } from '../store/docStore';
 import { useNotesStore } from '../store/notesStore';
@@ -12,8 +19,19 @@ interface NotesSidebarProps {
 }
 
 export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
-  const { groups, loaded, refresh, addGroup, renameNoteAt, renameGroupAt, moveNoteTo, removeNote, removeGroup } =
-    useNotesStore();
+  const {
+    groups,
+    loaded,
+    selectedGroup,
+    selectGroup,
+    refresh,
+    addGroup,
+    renameNoteAt,
+    renameGroupAt,
+    moveNoteTo,
+    removeNote,
+    removeGroup
+  } = useNotesStore();
   const activeNotePath = useDocStore((state) => state.notePath);
   const notesRoot = useSettingsStore((state) => state.notesRoot);
   const [rootDir, setRootDir] = useState('');
@@ -146,7 +164,13 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
       <div className="notes-head">
         <span>โน้ตของฉัน</span>
         <div className="notes-head-actions">
-          <button className="notes-action" title="โน้ตใหม่ (เข้ากลุ่มวันนี้)" onClick={() => onCreateNote()}>
+          <button
+            className="notes-action"
+            title="โน้ตใหม่ (ในกลุ่มที่เลือกอยู่ — ไม่มี → กลุ่มวันนี้)"
+            onClick={() =>
+              onCreateNote(selectedGroup ?? ((activeNotePath && noteGroupName(activeNotePath)) || undefined))
+            }
+          >
             <Plus size={15} />
           </button>
           <button className="notes-action" title="สร้างกลุ่มใหม่" onClick={handleAddGroup}>
@@ -171,7 +195,7 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
           return (
             <section
               key={group.path}
-              className={`notes-group ${dragOverGroup === group.name ? 'drag-over' : ''}`}
+              className={`notes-group ${selectedGroup === group.name ? 'selected' : ''} ${dragOverGroup === group.name ? 'drag-over' : ''}`}
               onDragOver={(event) => {
                 if (!isDropTarget) return;
                 event.preventDefault();
@@ -190,7 +214,14 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
               }}
             >
               <div className="notes-group-row">
-                <button className="notes-group-toggle" onClick={() => toggleGroup(group.name)}>
+                <button
+                  className="notes-group-toggle"
+                  title="คลิกเพื่อเลือกกลุ่มนี้ (ปุ่ม New จะสร้างโน้ตเข้ากลุ่มที่เลือก)"
+                  onClick={() => {
+                    selectGroup(group.name);
+                    toggleGroup(group.name);
+                  }}
+                >
                   {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                   <span className="notes-group-name">
                     {group.name}
