@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          # เปิดใช้เมื่อพร้อม build ข้ามแพลตฟอร์ม:
+          # - platform: macos-latest
+          #   args: '--target universal-apple-darwin'
+          # - platform: ubuntu-22.04  # ต้องติดตั้ง libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ก่อน
+          #   args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - run: npm test
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PlainMark ${{ github.ref_name }}'
+          releaseBody: 'ดาวน์โหลดตัวติดตั้ง Windows ได้จากไฟล์ด้านล่าง: `-setup.exe` (แนะนำ) หรือ `.msi`'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
