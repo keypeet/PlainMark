@@ -28,7 +28,8 @@ export function readImageAsDataUrl(file: File): Promise<string> {
 export function embedImageReference(content: string, cursor: number, dataUrl: string): FormatResult {
   const id = nextImageId(content);
   const imageMarkdown = `![วางรูปภาพ][${id}]\n`;
-  const reference = `\n[${id}]: ${dataUrl}\n`;
+  // ต้องมีบรรทัดว่างคั่นก่อนนิยามลิงก์ ไม่งั้น markdown มองเป็นข้อความต่อท้ายย่อหน้าเดิม
+  const reference = `\n\n[${id}]: ${dataUrl}\n`;
   const contentWithImage = content.slice(0, cursor) + imageMarkdown + content.slice(cursor);
   const nextContent = `${contentWithImage.trimEnd()}${reference}`;
   const nextCursor = cursor + imageMarkdown.length;
