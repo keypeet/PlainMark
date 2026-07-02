@@ -382,6 +382,21 @@ button {
 
 .notes-group {
   margin-bottom: 6px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+}
+
+.notes-group.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.notes-item[draggable] {
+  cursor: grab;
+}
+
+.notes-item[draggable]:active {
+  cursor: grabbing;
 }
 
 .notes-group-row,

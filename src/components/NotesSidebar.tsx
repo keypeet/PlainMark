@@ -16,6 +16,8 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
   const activeNotePath = useDocStore((state) => state.notePath);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [movingNote, setMovingNote] = useState<string | null>(null);
+  const [dragNote, setDragNote] = useState<{ note: NoteMeta; fromGroup: string } | null>(null);
+  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -117,8 +119,28 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
         {groups.map((group) => {
           const isCollapsed = collapsed.has(group.name);
           const isToday = group.name === todayGroupName();
+          const isDropTarget = dragNote !== null && dragNote.fromGroup !== group.name;
           return (
-            <section key={group.path} className="notes-group">
+            <section
+              key={group.path}
+              className={`notes-group ${dragOverGroup === group.name ? 'drag-over' : ''}`}
+              onDragOver={(event) => {
+                if (!isDropTarget) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                setDragOverGroup(group.name);
+              }}
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                setDragOverGroup((current) => (current === group.name ? null : current));
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (isDropTarget && dragNote) void handleMoveNote(dragNote.note, group.name);
+                setDragNote(null);
+                setDragOverGroup(null);
+              }}
+            >
               <div className="notes-group-row">
                 <button className="notes-group-toggle" onClick={() => toggleGroup(group.name)}>
                   {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
@@ -151,7 +173,20 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
 
               {!isCollapsed &&
                 group.notes.map((note) => (
-                  <div key={note.path} className={`notes-item ${activeNotePath === note.path ? 'active' : ''}`}>
+                  <div
+                    key={note.path}
+                    className={`notes-item ${activeNotePath === note.path ? 'active' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', note.name);
+                      setDragNote({ note, fromGroup: group.name });
+                    }}
+                    onDragEnd={() => {
+                      setDragNote(null);
+                      setDragOverGroup(null);
+                    }}
+                  >
                     <button className="notes-item-open" onClick={() => onOpenNote(note)} title={note.name}>
                       {note.name}
                     </button>
