@@ -296,10 +296,10 @@ export default function App() {
       </header>
 
       <main className={`workspace layout-${layout} ${sidebarOpen ? 'with-notes' : ''}`}>
+        {sidebarOpen && <NotesSidebar onOpenNote={(note) => void openNote(note)} onCreateNote={(group) => void createNote(group)} />}
         {visible.editor && <EditorPane ref={editorRef} />}
         {visible.preview && <PreviewPane html={html} />}
         <Toolbar editorRef={editorRef} />
-        {sidebarOpen && <NotesSidebar onOpenNote={(note) => void openNote(note)} onCreateNote={(group) => void createNote(group)} />}
       </main>
 
       <StatusBar />

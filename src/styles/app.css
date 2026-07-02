@@ -147,12 +147,12 @@ button {
 }
 
 .workspace.with-notes {
-  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) 58px 264px;
+  grid-template-columns: 264px minmax(280px, 1fr) minmax(280px, 1fr) 58px;
 }
 
 .workspace.layout-editor.with-notes,
 .workspace.layout-preview.with-notes {
-  grid-template-columns: minmax(320px, 1fr) 58px 264px;
+  grid-template-columns: 264px minmax(320px, 1fr) 58px;
 }
 
 .pane {
@@ -343,7 +343,7 @@ button {
   flex-direction: column;
   min-height: 0;
   background: var(--bg-soft);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .notes-head {
