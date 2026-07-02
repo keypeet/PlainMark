@@ -7,7 +7,9 @@ export interface SessionState {
   updatedAt: number;
 }
 
-const hasTauri = '__TAURI_INTERNALS__' in window;
+import { hasTauri, tauriFs, tauriPath } from './platform';
+import { baseName } from './paths';
+
 const browserKey = 'plainmark:session';
 const legacyDraftKey = 'plainmark:draft';
 const sessionFileName = 'session.json';
@@ -17,15 +19,17 @@ const sessionFileName = 'session.json';
 let writeChain: Promise<void> = Promise.resolve();
 let pending: SessionState | null = null;
 
+// รวมการหา path ของ session.json ไว้ที่เดียว (ใช้ทั้งเขียน/อ่าน/ลบ)
+async function sessionFile() {
+  const [path, fs] = await Promise.all([tauriPath(), tauriFs()]);
+  const dir = await path.appDataDir();
+  return { path, fs, dir, target: await path.join(dir, sessionFileName) };
+}
+
 async function writeSessionFile(state: SessionState): Promise<void> {
-  const [{ appDataDir, join }, fs] = await Promise.all([
-    import('@tauri-apps/api/path'),
-    import('@tauri-apps/plugin-fs')
-  ]);
-  const dir = await appDataDir();
+  const { path, fs, dir, target } = await sessionFile();
   await fs.mkdir(dir, { recursive: true });
-  const target = await join(dir, sessionFileName);
-  const tmp = await join(dir, `${sessionFileName}.tmp`);
+  const tmp = await path.join(dir, `${sessionFileName}.tmp`);
   await fs.writeTextFile(tmp, JSON.stringify(state));
   await fs.rename(tmp, target);
 }
@@ -60,11 +64,7 @@ export function flushSession(): Promise<void> {
 export async function loadSession(): Promise<SessionState | null> {
   if (hasTauri) {
     try {
-      const [{ appDataDir, join }, fs] = await Promise.all([
-        import('@tauri-apps/api/path'),
-        import('@tauri-apps/plugin-fs')
-      ]);
-      const target = await join(await appDataDir(), sessionFileName);
+      const { fs, target } = await sessionFile();
       if (await fs.exists(target)) {
         const session = parseSession(await fs.readTextFile(target));
         if (session) return session;
@@ -82,11 +82,7 @@ export async function clearSession(): Promise<void> {
   localStorage.removeItem(browserKey);
   if (!hasTauri) return;
   try {
-    const [{ appDataDir, join }, fs] = await Promise.all([
-      import('@tauri-apps/api/path'),
-      import('@tauri-apps/plugin-fs')
-    ]);
-    const target = await join(await appDataDir(), sessionFileName);
+    const { fs, target } = await sessionFile();
     if (await fs.exists(target)) await fs.remove(target);
   } catch (error) {
     console.error('PlainMark: session clear failed', error);
@@ -106,7 +102,7 @@ function migrateLegacyDraft(): SessionState | null {
     return {
       content: draft.content,
       filePath,
-      fileName: filePath?.split(/[\\/]/).pop() ?? 'untitled.md',
+      fileName: (filePath && baseName(filePath)) || 'untitled.md',
       notePath: null,
       dirty: true,
       updatedAt: Date.now()

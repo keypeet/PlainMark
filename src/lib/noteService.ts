@@ -11,17 +11,16 @@ export interface GroupMeta {
 }
 
 import { useSettingsStore } from '../store/settingsStore';
+import { hasTauri, tauriFs, tauriPath } from './platform';
+import { baseName, pathSegments } from './paths';
 
-export const notesSupported = '__TAURI_INTERNALS__' in window;
+export const notesSupported = hasTauri;
 
 const noteExtension = '.md';
 const rootFolderName = 'PlainMark';
 
 async function fsApi() {
-  const [path, fs] = await Promise.all([
-    import('@tauri-apps/api/path'),
-    import('@tauri-apps/plugin-fs')
-  ]);
+  const [path, fs] = await Promise.all([tauriPath(), tauriFs()]);
   return { path, fs };
 }
 
@@ -45,8 +44,13 @@ export async function ensureNotesRoot(): Promise<string> {
 
 // ชื่อกลุ่มของโน้ต = ชื่อโฟลเดอร์แม่ของไฟล์ (โครงสร้าง root\กลุ่ม\ชื่อโน้ต.md)
 export function noteGroupName(notePath: string): string | null {
-  const segments = notePath.split(/[\\/]/).filter(Boolean);
+  const segments = pathSegments(notePath);
   return segments.length >= 2 ? segments[segments.length - 2] : null;
+}
+
+// ชื่อโน้ต = ชื่อไฟล์ตัด .md ออก
+function noteNameFromPath(notePath: string): string {
+  return baseName(notePath).slice(0, -noteExtension.length);
 }
 
 export function todayGroupName(now: Date = new Date()): string {
@@ -134,11 +138,7 @@ export async function createNote(groupName?: string, title?: string): Promise<No
   const baseName = sanitizeName(title ?? 'โน้ตใหม่', 'โน้ตใหม่');
   const notePath = await uniquePath(groupPath, baseName, noteExtension);
   await fs.writeTextFile(notePath, '');
-  return {
-    name: notePath.split(/[\\/]/).pop()!.slice(0, -noteExtension.length),
-    path: notePath,
-    modifiedAt: Date.now()
-  };
+  return { name: noteNameFromPath(notePath), path: notePath, modifiedAt: Date.now() };
 }
 
 export async function readNote(notePath: string): Promise<string> {
@@ -174,7 +174,7 @@ export function flushNoteWrites(): Promise<void> {
 export async function renameNote(notePath: string, newTitle: string): Promise<NoteMeta> {
   const { path, fs } = await fsApi();
   const dir = await path.dirname(notePath);
-  const currentName = notePath.split(/[\\/]/).pop()!.slice(0, -noteExtension.length);
+  const currentName = noteNameFromPath(notePath);
   const nextName = sanitizeName(newTitle, 'untitled');
   if (nextName === currentName) {
     return { name: currentName, path: notePath, modifiedAt: Date.now() };
@@ -184,11 +184,7 @@ export async function renameNote(notePath: string, newTitle: string): Promise<No
   await fs.rename(notePath, target);
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
-  return {
-    name: target.split(/[\\/]/).pop()!.slice(0, -noteExtension.length),
-    path: target,
-    modifiedAt: Date.now()
-  };
+  return { name: noteNameFromPath(target), path: target, modifiedAt: Date.now() };
 }
 
 export async function renameGroup(groupPath: string, newName: string): Promise<string> {
@@ -205,14 +201,13 @@ export async function renameGroup(groupPath: string, newName: string): Promise<s
 export async function moveNote(notePath: string, targetGroupName: string): Promise<NoteMeta> {
   const { fs } = await fsApi();
   const groupPath = await createGroup(targetGroupName);
-  const fileName = notePath.split(/[\\/]/).pop()!;
-  const baseName = fileName.slice(0, -noteExtension.length);
-  const target = await uniquePath(groupPath, baseName, noteExtension);
+  const noteName = noteNameFromPath(notePath);
+  const target = await uniquePath(groupPath, noteName, noteExtension);
   await flushNoteWrites();
   await fs.rename(notePath, target);
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
-  return { name: baseName, path: target, modifiedAt: Date.now() };
+  return { name: noteName, path: target, modifiedAt: Date.now() };
 }
 
 export async function deleteNote(notePath: string): Promise<void> {

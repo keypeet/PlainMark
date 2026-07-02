@@ -12,6 +12,7 @@ import {
   renameNote
 } from '../lib/noteService';
 import type { NoteMeta } from '../lib/noteService';
+import { baseName } from '../lib/paths';
 
 interface NotesState {
   groups: GroupMeta[];
@@ -86,11 +87,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   renameGroupAt: async (groupPath, newName) => {
-    const oldName = groupPath.split(/[\\/]/).filter(Boolean).pop();
+    const oldName = baseName(groupPath);
     const newPath = await renameGroup(groupPath, newName);
     // ถ้ากลุ่มที่เลือกอยู่คือกลุ่มที่ถูกเปลี่ยนชื่อ ให้การเลือกตามไปชื่อใหม่
     if (get().selectedGroup === oldName) {
-      set({ selectedGroup: newPath.split(/[\\/]/).filter(Boolean).pop() ?? null });
+      set({ selectedGroup: baseName(newPath) || null });
     }
     await get().refresh();
   },

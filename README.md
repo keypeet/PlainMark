@@ -2,7 +2,7 @@
 
 Simple Markdown Note Editor: พิมพ์ง่ายเหมือน Notepad พร้อม Markdown Preview แบบเรียลไทม์
 
-**เวอร์ชันล่าสุด: 0.8.1**
+**เวอร์ชันล่าสุด: 0.9.0**
 
 > **งานของคุณไม่มีวันหาย** — ทุกอย่างที่พิมพ์ถูกบันทึกอัตโนมัติเสมอ ปิดแอปด้วยกากบาทได้เลย เปิดใหม่ทุกอย่างยังอยู่เหมือนเดิม ทำงานแบบ offline 100%
 
@@ -75,6 +75,23 @@ npm install
 npm run tauri:dev   # เปิดแอป desktop โหมดพัฒนา
 npm run dev         # เฉพาะ frontend ที่ http://127.0.0.1:1420
 npm test            # รัน vitest
+```
+
+## โครงสร้างโค้ด (สำหรับพัฒนาต่อ)
+
+```
+src/
+├─ lib/          logic ล้วน ไม่ผูก UI — มี unit test คู่กันเกือบทุกไฟล์
+│   ├─ platform.ts   จุดเดียวที่เช็ค/โหลดโมดูล Tauri (ไฟล์อื่นห้าม import Tauri ตรง)
+│   ├─ paths.ts      helper จัดการ path (baseName / pathSegments)
+│   ├─ noteService.ts  อ่าน-เขียน-ย้ายไฟล์โน้ตทั้งหมด
+│   └─ session.ts    บันทึก/กู้คืน session (งานไม่มีวันหาย)
+├─ store/        zustand stores: docStore (เอกสาร), notesStore (กลุ่มโน้ต), settingsStore (ตั้งค่า)
+├─ hooks/        hooks ระดับแอป: zoom, session autosave, คีย์ลัด, render markdown
+└─ components/
+    ├─ editor/   ส่วนขยาย CodeMirror (slash menu, floating toolbar, paste/drop ฯลฯ)
+    ├─ toolbar/  นิยามเครื่องมือจัดรูปแบบ + คีย์ลัด (toolConfig — source of truth เดียว)
+    └─ notes/    แผงกลุ่มโน้ต (NotesGroup, useNotesRoot)
 ```
 
 ## Release ผ่าน GitHub Actions

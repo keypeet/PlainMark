@@ -4,7 +4,8 @@ export interface LoadedFile {
   name: string;
 }
 
-const hasTauri = '__TAURI_INTERNALS__' in window;
+import { hasTauri, tauriDialog, tauriFs } from './platform';
+import { baseName } from './paths';
 
 function downloadTextFile(content: string, filename: string): void {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -36,10 +37,7 @@ function pickBrowserFile(): Promise<LoadedFile | null> {
 export async function openTextFile(): Promise<LoadedFile | null> {
   if (!hasTauri) return pickBrowserFile();
 
-  const [{ open }, { readTextFile }] = await Promise.all([
-    import('@tauri-apps/plugin-dialog'),
-    import('@tauri-apps/plugin-fs')
-  ]);
+  const [{ open }, { readTextFile }] = await Promise.all([tauriDialog(), tauriFs()]);
   const selectedPath = await open({
     multiple: false,
     filters: [{ name: 'Text', extensions: ['md', 'markdown', 'txt'] }]
@@ -48,11 +46,7 @@ export async function openTextFile(): Promise<LoadedFile | null> {
   if (typeof selectedPath !== 'string') return null;
 
   const content = await readTextFile(selectedPath);
-  return {
-    content,
-    path: selectedPath,
-    name: selectedPath.split(/[\\/]/).pop() ?? 'untitled.md'
-  };
+  return { content, path: selectedPath, name: baseName(selectedPath) || 'untitled.md' };
 }
 
 export async function saveTextFile(content: string, path: string | null): Promise<LoadedFile | null> {
@@ -61,10 +55,7 @@ export async function saveTextFile(content: string, path: string | null): Promis
     return { content, path: null, name: path ?? 'untitled.md' };
   }
 
-  const [{ save }, { writeTextFile }] = await Promise.all([
-    import('@tauri-apps/plugin-dialog'),
-    import('@tauri-apps/plugin-fs')
-  ]);
+  const [{ save }, { writeTextFile }] = await Promise.all([tauriDialog(), tauriFs()]);
   const targetPath =
     path ??
     (await save({
@@ -75,11 +66,7 @@ export async function saveTextFile(content: string, path: string | null): Promis
   if (!targetPath) return null;
   await writeTextFile(targetPath, content);
 
-  return {
-    content,
-    path: targetPath,
-    name: targetPath.split(/[\\/]/).pop() ?? 'untitled.md'
-  };
+  return { content, path: targetPath, name: baseName(targetPath) || 'untitled.md' };
 }
 
 export async function exportTextFile(content: string, extension: 'md' | 'txt'): Promise<void> {
@@ -90,10 +77,7 @@ export async function exportTextFile(content: string, extension: 'md' | 'txt'): 
     return;
   }
 
-  const [{ save }, { writeTextFile }] = await Promise.all([
-    import('@tauri-apps/plugin-dialog'),
-    import('@tauri-apps/plugin-fs')
-  ]);
+  const [{ save }, { writeTextFile }] = await Promise.all([tauriDialog(), tauriFs()]);
   const targetPath = await save({
     defaultPath: filename,
     filters: [{ name: extension === 'md' ? 'Markdown' : 'Plain Text', extensions: [extension] }]
