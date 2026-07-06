@@ -1,9 +1,10 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { useDocStore } from '../store/docStore';
+import { useSettingsStore } from '../store/settingsStore';
 import type { EditorApi } from '../types';
 import { collapseDataUrls } from './editor/collapseDataUrls';
 import { floatingToolbar } from './editor/floatingToolbar';
@@ -18,13 +19,64 @@ function getCursorPosition(content: string, offset: number) {
   return { line: lines.length, column: lines[lines.length - 1].length + 1 };
 }
 
+// CodeMirror เลือก tooltip theme (พื้นขาว/พื้นดำ) จาก dark flag ตอนสร้าง theme() เอง
+// ไม่ได้อ่านจาก CSS variable — ต้องบอกมันตรงๆ ว่าตอนนี้ธีมแอปเป็นมืดหรือไม่
+function resolveIsDark(theme: string): boolean {
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function editorTheme(dark: boolean) {
+  return EditorView.theme(
+    {
+      '&': {
+        height: '100%',
+        backgroundColor: 'var(--editor-bg)',
+        color: 'var(--text)'
+      },
+      '.cm-content': {
+        fontFamily: 'var(--mono)',
+        fontSize: '13.5px',
+        lineHeight: '1.7',
+        padding: '14px 16px',
+        caretColor: 'var(--text)'
+      },
+      '.cm-gutters': {
+        backgroundColor: 'var(--bg-soft)',
+        color: 'var(--text-soft)',
+        borderRight: '1px solid var(--border)'
+      },
+      '.cm-activeLineGutter, .cm-activeLine': {
+        backgroundColor: 'var(--active-line)'
+      },
+      '.cm-cursor, .cm-dropCursor': {
+        borderLeftColor: 'var(--text)',
+        borderLeftWidth: '2px'
+      },
+      '.cm-focused': {
+        outline: 'none'
+      },
+      '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+        backgroundColor: 'var(--accent-soft) !important'
+      },
+      '&.cm-focused .cm-selectionMatch': {
+        backgroundColor: 'var(--accent-soft)'
+      }
+    },
+    { dark }
+  );
+}
+
 export const EditorPane = forwardRef<EditorApi>((_, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const themeCompartmentRef = useRef(new Compartment());
   const content = useDocStore((state) => state.content);
   const fileName = useDocStore((state) => state.file.name);
   const setContent = useDocStore((state) => state.setContent);
   const setCursor = useDocStore((state) => state.setCursor);
+  const appTheme = useSettingsStore((state) => state.theme);
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -69,35 +121,7 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
           setCursor(getCursorPosition(update.state.doc.toString(), cursor));
         }
       }),
-      EditorView.theme({
-        '&': {
-          height: '100%',
-          backgroundColor: 'var(--editor-bg)',
-          color: 'var(--text)'
-        },
-        '.cm-content': {
-          fontFamily: 'var(--mono)',
-          fontSize: '13.5px',
-          lineHeight: '1.7',
-          padding: '14px 16px',
-          caretColor: 'var(--text)'
-        },
-        '.cm-gutters': {
-          backgroundColor: 'var(--bg-soft)',
-          color: 'var(--text-soft)',
-          borderRight: '1px solid var(--border)'
-        },
-        '.cm-activeLineGutter, .cm-activeLine': {
-          backgroundColor: 'var(--active-line)'
-        },
-        '.cm-cursor, .cm-dropCursor': {
-          borderLeftColor: 'var(--text)',
-          borderLeftWidth: '2px'
-        },
-        '.cm-focused': {
-          outline: 'none'
-        }
-      })
+      themeCompartmentRef.current.of(editorTheme(resolveIsDark(useSettingsStore.getState().theme)))
     ];
 
     const state = EditorState.create({ doc: content, extensions });
@@ -117,6 +141,21 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
     if (current === content) return;
     view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
   }, [content]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const applyDark = (dark: boolean) =>
+      view.dispatch({ effects: themeCompartmentRef.current.reconfigure(editorTheme(dark)) });
+
+    applyDark(resolveIsDark(appTheme));
+    if (appTheme !== 'system') return;
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (event: MediaQueryListEvent) => applyDark(event.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, [appTheme]);
 
   useEffect(() => {
     const root = containerRef.current;
