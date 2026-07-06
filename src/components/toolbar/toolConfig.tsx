@@ -25,6 +25,7 @@ import {
   toggleHeading,
   wrapSelection
 } from '../../lib/formatActions';
+import { fixTableBlock } from '../../lib/tableFormat';
 import type { FormatResult } from '../../types';
 
 export type ToolId =
@@ -98,9 +99,9 @@ export const tools: ToolConfig[] = [
   },
   {
     id: 'table',
-    label: 'Table (เลือกขนาด)',
+    label: 'Table (แทรก / จัดให้เป็นตาราง)',
     shortcut: 'Ctrl+Shift+T',
-    syntax: '| Col | Col |',
+    syntax: 'อยู่ในตาราง = จัดระเบียบ, นอกตาราง = แทรกใหม่',
     example: '| Name | Status |\n| --- | --- |\n| PlainMark | v0.5 |',
     icon: <Table2 size={18} />
   },
@@ -189,7 +190,8 @@ export function runTool(id: ToolId, content: string, selection: { from: number; 
     case 'quote':
       return prefixLines(content, selection, '> ');
     case 'table':
-      return createTable(content, selection);
+      // cursor อยู่ในบล็อกตาราง → จัดระเบียบตารางนั้นแทนการแทรกใหม่
+      return fixTableBlock(content, selection) ?? createTable(content, selection);
     case 'codeblock':
       return createCodeBlock(content, selection);
     case 'code':

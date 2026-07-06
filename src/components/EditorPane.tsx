@@ -9,6 +9,7 @@ import type { EditorApi } from '../types';
 import { collapseDataUrls } from './editor/collapseDataUrls';
 import { floatingToolbar } from './editor/floatingToolbar';
 import { hoverPreview } from './editor/hoverPreview';
+import { liveMarkdown } from './editor/liveMarkdown';
 import { attachPasteDrop } from './editor/pasteDrop';
 import { slashMenu } from './editor/slashMenu';
 import { smartFormatExtension } from './editor/smartFormatExtension';
@@ -68,10 +69,15 @@ function editorTheme(dark: boolean) {
   );
 }
 
-export const EditorPane = forwardRef<EditorApi>((_, ref) => {
+interface EditorPaneProps {
+  fullMode?: boolean;
+}
+
+export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ fullMode = false }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartmentRef = useRef(new Compartment());
+  const liveMarkdownCompartmentRef = useRef(new Compartment());
   const content = useDocStore((state) => state.content);
   const fileName = useDocStore((state) => state.file.name);
   const setContent = useDocStore((state) => state.setContent);
@@ -112,6 +118,7 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
       slashMenu(),
       floatingToolbar(),
       hoverPreview(),
+      liveMarkdownCompartmentRef.current.of(fullMode ? liveMarkdown() : []),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           setContent(update.state.doc.toString());
@@ -162,6 +169,14 @@ export const EditorPane = forwardRef<EditorApi>((_, ref) => {
     if (!root) return;
     return attachPasteDrop(root, () => viewRef.current);
   }, []);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: liveMarkdownCompartmentRef.current.reconfigure(fullMode ? liveMarkdown() : [])
+    });
+  }, [fullMode]);
 
   return (
     <section className="pane editor-pane">

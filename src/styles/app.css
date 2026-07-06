@@ -146,12 +146,17 @@ button {
   grid-template-columns: minmax(320px, 1fr) 58px;
 }
 
+.workspace.layout-full {
+  grid-template-columns: minmax(320px, 1fr) 58px;
+}
+
 .workspace.with-notes {
   grid-template-columns: 264px minmax(280px, 1fr) minmax(280px, 1fr) 58px;
 }
 
 .workspace.layout-editor.with-notes,
-.workspace.layout-preview.with-notes {
+.workspace.layout-preview.with-notes,
+.workspace.layout-full.with-notes {
   grid-template-columns: 264px minmax(320px, 1fr) 58px;
 }
 
@@ -762,7 +767,8 @@ button {
 
   .workspace,
   .workspace.layout-editor,
-  .workspace.layout-preview {
+  .workspace.layout-preview,
+  .workspace.layout-full {
     grid-template-columns: minmax(0, 1fr) 52px;
   }
 
@@ -776,7 +782,8 @@ button {
 
   .workspace.with-notes,
   .workspace.layout-editor.with-notes,
-  .workspace.layout-preview.with-notes {
+  .workspace.layout-preview.with-notes,
+  .workspace.layout-full.with-notes {
     grid-template-columns: minmax(0, 1fr) 52px;
   }
 

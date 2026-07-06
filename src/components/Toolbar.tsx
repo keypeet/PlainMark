@@ -1,5 +1,6 @@
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createTable } from '../lib/formatActions';
+import { fixTableBlock } from '../lib/tableFormat';
 import { renderMarkdown } from '../lib/markdownEngine';
 import { useDocStore } from '../store/docStore';
 import type { EditorApi, FormatResult } from '../types';
@@ -49,6 +50,16 @@ export function Toolbar({ editorRef }: ToolbarProps) {
 
   const handleToolClick = useCallback(
     (toolId: ToolId, event: React.MouseEvent<HTMLButtonElement>) => {
+      if (toolId === 'table') {
+        // cursor อยู่ในบล็อกตาราง → จัดระเบียบตารางนั้นเลย ไม่ต้องเปิด popover แทรกใหม่
+        const editor = editorRef.current;
+        const fixed = editor ? fixTableBlock(content, editor.getSelection()) : null;
+        if (fixed) {
+          applyResult(fixed);
+          setPopover(null);
+          return;
+        }
+      }
       if (toolId === 'table' || toolId === 'list') {
         const kind: PopoverKind = toolId === 'table' ? 'table' : 'list';
         setPopoverTop(Math.min(event.currentTarget.getBoundingClientRect().top, window.innerHeight - 220));
@@ -58,7 +69,7 @@ export function Toolbar({ editorRef }: ToolbarProps) {
       setPopover(null);
       applyTool(toolId);
     },
-    [applyTool]
+    [applyResult, applyTool, content, editorRef]
   );
 
   // ปิด popover เมื่อคลิกที่อื่น

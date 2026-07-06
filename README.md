@@ -2,7 +2,7 @@
 
 Simple Markdown Note Editor: พิมพ์ง่ายเหมือน Notepad พร้อม Markdown Preview แบบเรียลไทม์
 
-**เวอร์ชันล่าสุด: 0.9.0**
+**เวอร์ชันล่าสุด: 0.9.5**
 
 > **งานของคุณไม่มีวันหาย** — ทุกอย่างที่พิมพ์ถูกบันทึกอัตโนมัติเสมอ ปิดแอปด้วยกากบาทได้เลย เปิดใหม่ทุกอย่างยังอยู่เหมือนเดิม ทำงานแบบ offline 100%
 
@@ -17,7 +17,12 @@ Simple Markdown Note Editor: พิมพ์ง่ายเหมือน Notep
 ## ฟีเจอร์
 
 - **Editor + Live Preview** — CodeMirror 6 + markdown-it + highlight.js (sanitize ด้วย DOMPurify)
+- **โหมด Full (Live Markdown แบบ Typora)** — พิมพ์ใน editor เดียว เห็นผลจัดฟอร์แมตทับ syntax ทันที
+  (ซ่อน `#`, `**`, `` ` `` ฯลฯ ยกเว้นบรรทัดที่ cursor อยู่ซึ่งโชว์ raw text ให้แก้ไขได้ปกติ)
+  รูปภาพและตารางแสดงผลจริงในเนื้อบรรทัด ไม่ต้องสลับไป Preview
 - **Toolbar จัดรูปแบบ** — Heading, Bold, Italic, Table, Code Block, Link, Image, List ฯลฯ ไม่ต้องจำ syntax
+- **จัดตารางอัตโนมัติ** — พิมพ์แถว `| ... |` เองแล้วลืมแถวคั่นหรือจัดคอลัมน์ไม่ตรง กดปุ่ม Table (หรือ `Ctrl+Shift+T`)
+  ขณะ cursor อยู่ในตารางเพื่อจัดระเบียบให้ถูกต้องทันที ในโหมด Full จะมีปุ่ม "⚡ จัดให้เป็นตาราง" ขึ้นให้กดตรงจุดที่ตารางยังไม่สมบูรณ์
 - **Slash Command** — พิมพ์ `/` แล้วเลือกคำสั่ง (Heading, Table, Quote, Image, Code, Todo, Link ฯลฯ)
   ค้นหาแบบ fuzzy ได้ทั้งอังกฤษและไทย เช่น `/ตาราง` — เพิ่มทุกอย่างได้โดยไม่ต้องแตะเมาส์
 - **Smart Auto-format** — กด Enter ท้ายบรรทัด list/checklist/quote แล้วต่อ marker ให้เอง

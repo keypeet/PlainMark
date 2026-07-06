@@ -9,6 +9,7 @@ import {
   PanelLeft,
   PanelRight,
   Save,
+  ScrollText,
   Sun
 } from 'lucide-react';
 import { EditorPane } from './components/EditorPane';
@@ -43,7 +44,7 @@ export default function App() {
 
   const visible = useMemo(
     () => ({
-      editor: layout === 'split' || layout === 'editor',
+      editor: layout === 'split' || layout === 'editor' || layout === 'full',
       preview: layout === 'split' || layout === 'preview'
     }),
     [layout]
@@ -173,11 +174,12 @@ export default function App() {
         <div className="spacer" />
 
         <div className="segmented" aria-label="Layout">
-          {(['split', 'editor', 'preview'] as LayoutMode[]).map((mode) => (
+          {(['split', 'editor', 'preview', 'full'] as LayoutMode[]).map((mode) => (
             <button key={mode} className={layout === mode ? 'active' : ''} onClick={() => setLayout(mode)}>
               {mode === 'split' && <PanelLeft size={15} />}
               {mode === 'editor' && <PanelRight size={15} />}
               {mode === 'preview' && <Eye size={15} />}
+              {mode === 'full' && <ScrollText size={15} />}
               {mode}
             </button>
           ))}
@@ -198,7 +200,7 @@ export default function App() {
 
       <main className={`workspace layout-${layout} ${sidebarOpen ? 'with-notes' : ''}`}>
         {sidebarOpen && <NotesSidebar onOpenNote={(note) => void openNote(note)} onCreateNote={(group) => void createNote(group)} />}
-        {visible.editor && <EditorPane ref={editorRef} />}
+        {visible.editor && <EditorPane ref={editorRef} fullMode={layout === 'full'} />}
         {visible.preview && <PreviewPane html={html} />}
         <Toolbar editorRef={editorRef} />
       </main>

@@ -1,4 +1,4 @@
-export type LayoutMode = 'split' | 'editor' | 'preview';
+export type LayoutMode = 'split' | 'editor' | 'preview' | 'full';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
