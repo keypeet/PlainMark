@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, FolderInput, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, EyeOff, FolderInput, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { GroupMeta, NoteMeta } from '../../lib/noteService';
-import { todayGroupName } from '../../lib/noteService';
+import { noteGroupName, todayGroupName } from '../../lib/noteService';
 import { useDocStore } from '../../store/docStore';
 import { useNotesStore } from '../../store/notesStore';
+import { useSettingsStore } from '../../store/settingsStore';
 
 interface NotesGroupProps {
   group: GroupMeta;
@@ -42,11 +43,14 @@ export function NotesGroup({
 }: NotesGroupProps) {
   const { selectedGroup, selectGroup, renameNoteAt, renameGroupAt, moveNoteTo, removeNote, removeGroup } =
     useNotesStore();
+  const hidePath = useSettingsStore((state) => state.hidePath);
   const activeNotePath = useDocStore((state) => state.notePath);
   const [collapsed, setCollapsed] = useState(false);
   const [movingNotePath, setMovingNotePath] = useState<string | null>(null);
 
   const isToday = group.name === todayGroupName();
+  // เปิดโน้ตในกลุ่มใด ให้กลุ่มนั้นเป็น active เสมอ ไม่ค้างสีจากกลุ่มที่เคยคลิกก่อนหน้า
+  const displaySelectedGroup = activeNotePath ? noteGroupName(activeNotePath) === group.name : selectedGroup === group.name;
 
   const handleRenameGroup = () => {
     const name = window.prompt('เปลี่ยนชื่อกลุ่ม:', group.name);
@@ -90,7 +94,7 @@ export function NotesGroup({
 
   return (
     <section
-      className={`notes-group ${selectedGroup === group.name ? 'selected' : ''} ${isDragOver ? 'drag-over' : ''}`}
+      className={`notes-group ${displaySelectedGroup ? 'selected' : ''} ${isDragOver ? 'drag-over' : ''}`}
       onDragOver={(event) => {
         if (!isDropTarget) return;
         event.preventDefault();
@@ -130,6 +134,13 @@ export function NotesGroup({
           <button className="notes-action" title="เปลี่ยนชื่อกลุ่ม" onClick={handleRenameGroup}>
             <Pencil size={13} />
           </button>
+          <button
+            className="notes-action"
+            title="ซ่อนกลุ่มนี้ (ไฟล์ยังอยู่ — ดู/ยกเลิกได้จากปุ่มรายการที่ซ่อน)"
+            onClick={() => hidePath(group.path)}
+          >
+            <EyeOff size={13} />
+          </button>
           <button className="notes-action danger" title="ลบกลุ่ม" onClick={handleDeleteGroup}>
             <Trash2 size={13} />
           </button>
@@ -162,6 +173,13 @@ export function NotesGroup({
                 onClick={() => setMovingNotePath(movingNotePath === note.path ? null : note.path)}
               >
                 <FolderInput size={13} />
+              </button>
+              <button
+                className="notes-action"
+                title="ซ่อนโน้ตนี้ (ไฟล์ยังอยู่ — ดู/ยกเลิกได้จากปุ่มรายการที่ซ่อน)"
+                onClick={() => hidePath(note.path)}
+              >
+                <EyeOff size={13} />
               </button>
               <button className="notes-action danger" title="ลบโน้ต" onClick={() => handleDeleteNote(note)}>
                 <Trash2 size={13} />

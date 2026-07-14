@@ -27,12 +27,22 @@ export function readImageAsDataUrl(file: File): Promise<string> {
 
 export function embedImageReference(content: string, cursor: number, dataUrl: string): FormatResult {
   const id = nextImageId(content);
-  const imageMarkdown = `![วางรูปภาพ][${id}]\n`;
+  const leadingNewline = cursor > 0 && content[cursor - 1] !== '\n' ? '\n' : '';
+  const imageMarkdown = `${leadingNewline}![วางรูปภาพ][${id}]\n`;
   // ต้องมีบรรทัดว่างคั่นก่อนนิยามลิงก์ ไม่งั้น markdown มองเป็นข้อความต่อท้ายย่อหน้าเดิม
   const reference = `\n\n[${id}]: ${dataUrl}\n`;
   const contentWithImage = content.slice(0, cursor) + imageMarkdown + content.slice(cursor);
   const nextContent = `${contentWithImage.trimEnd()}${reference}`;
   const nextCursor = cursor + imageMarkdown.length;
 
+  return { content: nextContent, selectionStart: nextCursor, selectionEnd: nextCursor };
+}
+
+export function embedImageAsset(content: string, cursor: number, relativePath: string): FormatResult {
+  const leadingNewline = cursor > 0 && content[cursor - 1] !== '\n' ? '\n' : '';
+  const markdownPath = relativePath.split('/').map(encodeURIComponent).join('/');
+  const imageMarkdown = `${leadingNewline}![image](${markdownPath})\n`;
+  const nextContent = content.slice(0, cursor) + imageMarkdown + content.slice(cursor);
+  const nextCursor = cursor + imageMarkdown.length;
   return { content: nextContent, selectionStart: nextCursor, selectionEnd: nextCursor };
 }

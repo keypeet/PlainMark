@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { embedImageReference } from './imagePaste';
+import { embedImageAsset, embedImageReference } from './imagePaste';
 import { renderMarkdown } from './markdownEngine';
 
 const pngDataUrl = `data:image/png;base64,${'A'.repeat(80)}`;
@@ -26,5 +26,11 @@ describe('embedImageReference', () => {
     expect(second.content).toContain('[img2]:');
     const html = renderMarkdown(second.content);
     expect((html.match(/<img/g) ?? []).length).toBe(2);
+  });
+
+  it('uses a compact relative path for image assets', () => {
+    const result = embedImageAsset('note', 4, 'new note.assets/image-123.png');
+    expect(result.content).toBe('note\n![image](new%20note.assets/image-123.png)\n');
+    expect(renderMarkdown(result.content)).toContain('src="new%20note.assets/image-123.png"');
   });
 });

@@ -1,10 +1,27 @@
 // Live Markdown (โหมด Full) — แสดงผลจัดฟอร์แมตทับ syntax markdown ในบรรทัดเดียวกับที่พิมพ์
 // แนวคิดแบบ Typora: ซ่อนสัญลักษณ์ (**, #, `) ยกเว้นบรรทัด/ช่วงที่ cursor อยู่ ซึ่งจะโชว์ raw text ให้แก้ไขได้ปกติ
 import type { EditorState, Extension, Range, Text } from '@codemirror/state';
-import { RangeSetBuilder, StateField } from '@codemirror/state';
+import { Facet, RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { renderMarkdown } from '../../lib/markdownEngine';
-import { fixTableBlock } from '../../lib/tableFormat';
+import { hasTauri, tauriCore, tauriPath } from '../../lib/platform';
+import { fixTableBlock, isSeparatorRow, parseCells, tableRowOf } from '../../lib/tableFormat';
+
+// path ของเอกสารปัจจุบัน — ใช้ resolve รูป relative (เช่น note.assets/…) แบบเดียวกับ useRenderedMarkdown
+const documentPathFacet = Facet.define<string | null, string | null>({
+  combine: (values) => (values.length ? values[0] : null)
+});
+
+/** ตั้ง src ให้ <img> — path relative ต้องแปลงผ่าน convertFileSrc ของ Tauri ไม่งั้นรูปที่วางไว้ข้างไฟล์จะไม่ขึ้น */
+function assignImageSrc(img: HTMLImageElement, src: string, documentPath: string | null) {
+  if (!hasTauri || !documentPath || /^(?:[a-z][a-z+.-]*:|\/)/i.test(src)) {
+    img.src = src;
+    return;
+  }
+  void Promise.all([tauriPath(), tauriCore()]).then(async ([{ dirname, join }, { convertFileSrc }]) => {
+    img.src = convertFileSrc(await join(await dirname(documentPath), decodeURIComponent(src)));
+  });
+}
 
 const headingLine = /^(#{1,6})\s+/;
 const quoteMarker = /^(\s*>\s?)/;
@@ -61,9 +78,9 @@ class ImageWidget extends WidgetType {
   eq(other: ImageWidget) {
     return other.src === this.src && other.alt === this.alt;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const img = document.createElement('img');
-    img.src = this.src;
+    assignImageSrc(img, this.src, view.state.facet(documentPathFacet));
     img.alt = this.alt;
     img.className = 'cm-lm-image';
     return img;
@@ -264,25 +281,106 @@ function buildDecorations(view: EditorView): DecorationSet {
 // ---------- ตาราง (block-level) ----------
 // CodeMirror ไม่อนุญาตให้ ViewPlugin สร้าง decoration คร่อมหลายบรรทัด (block widget)
 // จึงต้องใช้ StateField แยก — render ทั้งก้อนด้วย engine เดียวกับ Preview เพื่อให้หน้าตาตรงกันเสมอ
+// เซลล์ (th/td) แก้ไขได้โดยตรงแบบ Notepad/Typora: พิมพ์ลงช่องแล้ว sync กลับเป็น markdown ให้อัตโนมัติ
+
+/** escape เฉพาะ | ที่ผู้ใช้พิมพ์เอง (ตัวที่ escape อยู่แล้วปล่อยไว้) กันเซลล์แตกเป็นคอลัมน์ใหม่ */
+const escapeCellPipes = (cell: string) => cell.replace(/(?<!\\)\|/g, '\\|');
+
+function placeCaretAtEnd(el: HTMLElement) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+/** ขอบเขตบล็อกตารางของ widget ณ ตอนนี้ — ตำแหน่งเลื่อนได้เมื่อแก้ข้อความเหนือขึ้นไป จึงหาสดจาก DOM เสมอ */
+function tableBlockRange(view: EditorView, dom: HTMLElement): { from: number; to: number } | null {
+  if (!dom.isConnected) return null;
+  let pos: number;
+  try {
+    pos = view.posAtDOM(dom);
+  } catch {
+    return null;
+  }
+  const doc = view.state.doc;
+  const first = doc.lineAt(pos);
+  if (!tableRowLine.test(first.text)) return null;
+  let last = first.number;
+  while (last < doc.lines && tableRowLine.test(doc.line(last + 1).text)) last += 1;
+  return { from: first.from, to: doc.line(last).to };
+}
+
+/** โฟกัสช่องแรกของตารางที่ตำแหน่ง pos — ใช้หลังแทรกตารางใหม่ให้พิมพ์ต่อได้เลย (ไม่เจอตารางก็เงียบไป) */
+export function focusFirstTableCellAt(view: EditorView, pos: number) {
+  focusCellIn(view, pos, 0, 0);
+}
+
+/** หา widget ตารางที่ตำแหน่ง pos แล้วโฟกัสเซลล์ (ใช้หลังเพิ่มแถวใหม่ ซึ่งต้องสร้าง DOM ใหม่ทั้งก้อน) */
+function focusCellIn(view: EditorView, pos: number, rowIndex: number, colIndex: number) {
+  for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>('.cm-lm-table'))) {
+    try {
+      if (view.posAtDOM(el) !== pos) continue;
+    } catch {
+      continue;
+    }
+    const cell = el.querySelectorAll('tr')[rowIndex]?.children[colIndex];
+    if (cell instanceof HTMLElement) {
+      cell.focus();
+      placeCaretAtEnd(cell);
+    }
+    return;
+  }
+}
+
+/** แสดงผล markdown ของเนื้อเซลล์ (ตอนไม่ได้แก้) — แนบนิยาม reference ให้รูป/ลิงก์แบบ ![a][id] ออกด้วย */
+function renderCellMarkdown(cell: HTMLElement, defLines: string, documentPath: string | null) {
+  const holder = document.createElement('div');
+  holder.innerHTML = renderMarkdown((cell.dataset.raw ?? '') + defLines); // ผ่าน DOMPurify แล้ว
+  const paragraph = holder.querySelector('p');
+  cell.innerHTML = paragraph ? paragraph.innerHTML : '';
+  if (!paragraph) cell.textContent = holder.textContent ?? '';
+  for (const img of cell.querySelectorAll('img')) {
+    const source = img.getAttribute('src');
+    if (source) assignImageSrc(img, source, documentPath);
+  }
+}
+
 class TableWidget extends WidgetType {
   constructor(
-    private readonly source: string,
-    private readonly blockFrom: number,
+    private readonly block: string, // ข้อความตารางดิบในเอกสาร (ไม่รวมนิยาม reference ที่พ่วงตอน render)
+    private readonly defLines: string,
     private readonly needsFix: boolean
   ) {
     super();
   }
   eq(other: TableWidget) {
-    return other.source === this.source && other.blockFrom === this.blockFrom && other.needsFix === this.needsFix;
+    return other.block === this.block && other.defLines === this.defLines && other.needsFix === this.needsFix;
+  }
+  // เนื้อหาใหม่คือสิ่งที่กริดของ widget นี้เพิ่ง commit ลงเอกสารเอง → DOM มีข้อความล่าสุดอยู่แล้ว
+  // เก็บ DOM เดิมไว้เพื่อไม่ให้ focus/caret ในเซลล์หลุดระหว่างพิมพ์ (การแก้จากภายนอกยัง render ใหม่ปกติ)
+  updateDOM(dom: HTMLElement) {
+    if (dom.dataset.pmExpected === this.block) {
+      delete dom.dataset.pmExpected;
+      return true;
+    }
+    return false;
   }
   toDOM(view: EditorView) {
     const dom = document.createElement('div');
     dom.className = 'cm-lm-table markdown-body';
-    dom.innerHTML = renderMarkdown(this.source); // ผ่าน DOMPurify ใน renderMarkdown แล้ว
+    dom.innerHTML = renderMarkdown(this.block + this.defLines); // ผ่าน DOMPurify ใน renderMarkdown แล้ว
+
+    // รูปในเซลล์ตารางก็ต้อง resolve path relative เหมือนรูปเดี่ยว
+    const documentPath = view.state.facet(documentPathFacet);
+    for (const img of dom.querySelectorAll('img')) {
+      const source = img.getAttribute('src');
+      if (source) assignImageSrc(img, source, documentPath);
+    }
 
     // ตารางที่ยังไม่สมบูรณ์ (แตกเป็นเศษด้วยบรรทัดว่าง / ไม่มีแถวคั่น) — ให้ปุ่มแก้ตรงจุด
     if (this.needsFix) {
-      const from = this.blockFrom;
       const hint = document.createElement('button');
       hint.className = 'cm-lm-table-fix';
       hint.textContent = '⚡ จัดให้เป็นตาราง';
@@ -290,7 +388,9 @@ class TableWidget extends WidgetType {
       hint.addEventListener('mousedown', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const result = fixTableBlock(view.state.doc.toString(), { from, to: from });
+        const range = tableBlockRange(view, dom);
+        if (!range) return;
+        const result = fixTableBlock(view.state.doc.toString(), { from: range.from, to: range.from });
         if (!result) return;
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: result.content },
@@ -302,12 +402,146 @@ class TableWidget extends WidgetType {
       });
       dom.appendChild(hint);
     }
+
+    // ปุ่มสลับไปแก้เป็นข้อความ markdown (โผล่ตอน hover) — ไว้เพิ่ม/ลบแถว-คอลัมน์แบบอิสระ
+    const rawButton = document.createElement('button');
+    rawButton.className = 'cm-lm-table-raw';
+    rawButton.textContent = 'แก้ md';
+    rawButton.title = 'แก้ตารางเป็นข้อความ markdown (เพิ่ม/ลบแถว-คอลัมน์ได้อิสระ)';
+    rawButton.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const range = tableBlockRange(view, dom);
+      if (!range) return;
+      view.dispatch({ selection: { anchor: range.from }, scrollIntoView: true });
+      view.focus();
+    });
+    dom.appendChild(rawButton);
+
+    this.attachCellEditing(dom, view, documentPath);
     return dom;
   }
-  // คลิกที่ตัวตาราง → ให้ editor รับ event (cursor ย้ายเข้า block → สลับเป็น raw ให้แก้ได้)
-  // ยกเว้นคลิกที่ปุ่มแก้ — widget จัดการเอง
+
+  /** ผูกการแก้ไขในช่อง: คลิกเซลล์แล้วพิมพ์ได้เลย, Tab/Enter เดินช่อง, Tab/Enter ท้ายตาราง = เพิ่มแถว */
+  private attachCellEditing(dom: HTMLElement, view: EditorView, documentPath: string | null) {
+    const table = dom.querySelector('table');
+    if (!table) return;
+
+    const dataRows = this.block
+      .split('\n')
+      .map(parseCells)
+      .filter((cells) => !isSeparatorRow(cells));
+    const domRows = Array.from(table.querySelectorAll('tr'));
+    const columns = dataRows[0]?.length ?? 0;
+    // โครง DOM ต้องตรงกับ markdown แถวต่อแถว เซลล์ต่อเซลล์ ไม่งั้นการ sync กลับอาจกินข้อมูล
+    // (เช่น แถวที่เซลล์เกินหัวตารางจะถูกตัดทิ้งตอน render) — กรณีนั้นปล่อยเป็นตารางอ่านอย่างเดียว
+    if (columns === 0 || domRows.length !== dataRows.length || dataRows.some((cells) => cells.length !== columns)) {
+      return;
+    }
+
+    const cellsOf = (row: Element) =>
+      Array.from(row.children).filter((cell): cell is HTMLElement => cell instanceof HTMLElement);
+    const defLines = this.defLines;
+
+    // เขียนสถานะกริดกลับลงเอกสาร: แถวที่เนื้อไม่เปลี่ยนคงบรรทัดเดิมไว้ (ไม่ไปยุ่ง padding ที่จัดสวยแล้ว)
+    // appendRow = เพิ่มแถวเปล่าต่อท้าย (ต้อง render DOM ใหม่ แล้วค่อยย้าย focus ไปแถวใหม่)
+    const commitGrid = (appendRow = false, focusCol = 0) => {
+      const range = tableBlockRange(view, dom);
+      if (!range) return;
+      const doc = view.state.doc;
+      const currentBlock = doc.sliceString(range.from, range.to);
+      let rowIndex = 0;
+      const nextLines = currentBlock.split('\n').map((line) => {
+        if (isSeparatorRow(parseCells(line))) return line;
+        const domRow = domRows[rowIndex++];
+        if (!domRow) return line;
+        const raws = cellsOf(domRow).map((cell) => escapeCellPipes((cell.dataset.raw ?? '').trim()));
+        const parsed = parseCells(line);
+        const changed = raws.length !== parsed.length || raws.some((raw, index) => raw !== parsed[index]);
+        return changed ? `| ${raws.join(' | ')} |` : line;
+      });
+      if (appendRow) nextLines.push(tableRowOf(columns, '   '));
+      const nextBlock = nextLines.join('\n');
+      if (nextBlock === currentBlock) return;
+      if (!appendRow) dom.dataset.pmExpected = nextBlock;
+      view.dispatch({ changes: { from: range.from, to: range.to, insert: nextBlock }, userEvent: 'input' });
+      if (appendRow) requestAnimationFrame(() => focusCellIn(view, range.from, domRows.length, focusCol));
+    };
+
+    domRows.forEach((domRow, rowIndex) => {
+      cellsOf(domRow).forEach((cell, colIndex) => {
+        cell.dataset.raw = dataRows[rowIndex][colIndex];
+        try {
+          cell.contentEditable = 'plaintext-only'; // กัน browser แทรกแท็ก HTML (bold/สี) ที่จะหายตอน sync
+        } catch {
+          cell.contentEditable = 'true';
+        }
+        cell.spellcheck = false;
+
+        cell.addEventListener('focus', () => {
+          if (cell.dataset.editing) return;
+          cell.dataset.editing = '1';
+          const raw = cell.dataset.raw ?? '';
+          // เซลล์ข้อความล้วน (แสดงผลตรงกับ raw อยู่แล้ว) ไม่ต้องสลับ — caret คงอยู่ตรงจุดที่คลิก
+          if (cell.textContent !== raw) {
+            cell.textContent = raw;
+            placeCaretAtEnd(cell);
+          }
+        });
+
+        cell.addEventListener('input', () => {
+          cell.dataset.raw = (cell.textContent ?? '').replace(/\s*\n\s*/g, ' ');
+          commitGrid();
+        });
+
+        cell.addEventListener('blur', () => {
+          delete cell.dataset.editing;
+          commitGrid(); // เผื่อกรณีสุดท้ายยังไม่ได้เขียน (ปกติ input เขียนไปแล้ว — ซ้ำก็ no-op)
+          renderCellMarkdown(cell, defLines, documentPath);
+        });
+
+        cell.addEventListener('keydown', (event) => {
+          const key = event.key.toLowerCase();
+          if ((event.ctrlKey || event.metaKey) && key === 's') return; // ปล่อย Ctrl+S ให้แอปบันทึกตามปกติ
+          event.stopPropagation(); // กัน keymap ของ editor (Enter/Ctrl+B ฯลฯ) ทำงานทับตอนพิมพ์ในเซลล์
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            cell.blur();
+            view.focus();
+            return;
+          }
+          if (event.key === 'Tab') {
+            event.preventDefault();
+            const flat = domRows.flatMap(cellsOf);
+            const target = flat[flat.indexOf(cell) + (event.shiftKey ? -1 : 1)];
+            if (target) {
+              target.focus();
+              placeCaretAtEnd(target);
+            } else if (!event.shiftKey) {
+              commitGrid(true, 0); // Tab ที่เซลล์สุดท้าย = เพิ่มแถวใหม่ (พิมพ์ต่อยาวๆ ได้ไม่สะดุด)
+            }
+            return;
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            const below = domRows[rowIndex + 1] ? cellsOf(domRows[rowIndex + 1])[colIndex] : undefined;
+            if (below) {
+              below.focus();
+              placeCaretAtEnd(below);
+            } else {
+              commitGrid(true, colIndex); // Enter ที่แถวสุดท้าย = เพิ่มแถวใหม่คอลัมน์เดิม
+            }
+          }
+        });
+      });
+    });
+  }
+
+  // เซลล์และปุ่มบน widget จัดการ event เอง — ที่เหลือ (ขอบตาราง) ปล่อยให้ editor รับ
+  // (cursor ย้ายเข้า block → สลับเป็นข้อความ raw ให้แก้โครงตารางได้)
   ignoreEvent(event: Event) {
-    return event.target instanceof HTMLElement && event.target.closest('.cm-lm-table-fix') !== null;
+    if (!(event.target instanceof HTMLElement)) return false;
+    return event.target.closest('.cm-lm-table-fix, .cm-lm-table-raw, th, td') !== null;
   }
 }
 
@@ -337,15 +571,15 @@ function buildTableDecorations(state: EditorState): DecorationSet {
       const touches = state.selection.ranges.some((range) => range.from <= to && range.to >= from);
       if (!touches) {
         // พ่วงนิยาม reference ให้รูป/ลิงก์ reference-style ในเซลล์แสดงได้ (แบบเดียวกับ hoverPreview)
-        const source = doc.sliceString(from, to) + defLines;
+        const block = doc.sliceString(from, to);
         // "เศษตาราง": มีบล็อกแถวตารางอีกก้อนห่างแค่บรรทัดว่างเดียว (ผู้ใช้เผลอเว้นบรรทัด)
         // หรือก้อนนี้เอง render ไม่ออกเป็นตาราง (ไม่มีแถวคั่น) → โชว์ปุ่มแก้ตรงจุด
         const fragmentAbove =
           i > 2 && blankOnly.test(doc.line(i - 1).text) && tableRowLine.test(doc.line(i - 2).text);
         const fragmentBelow =
           last + 2 <= doc.lines && blankOnly.test(doc.line(last + 1).text) && tableRowLine.test(doc.line(last + 2).text);
-        const needsFix = fragmentAbove || fragmentBelow || !renderMarkdown(source).includes('<table');
-        builder.add(from, to, Decoration.replace({ widget: new TableWidget(source, from, needsFix), block: true }));
+        const needsFix = fragmentAbove || fragmentBelow || !renderMarkdown(block + defLines).includes('<table');
+        builder.add(from, to, Decoration.replace({ widget: new TableWidget(block, defLines, needsFix), block: true }));
       }
     }
     i = last + 1;
@@ -377,8 +611,9 @@ const liveMarkdownPlugin = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations }
 );
 
-export function liveMarkdown(): Extension {
+export function liveMarkdown(documentPath: string | null = null): Extension {
   return [
+    documentPathFacet.of(documentPath),
     liveMarkdownPlugin,
     tableField,
     EditorView.baseTheme({
@@ -420,11 +655,44 @@ export function liveMarkdown(): Extension {
         verticalAlign: 'middle'
       },
       '.cm-lm-table': {
+        position: 'relative',
         padding: '2px 0',
-        cursor: 'text'
+        cursor: 'text',
+        // .cm-content เป็น pre-wrap — ถ้าไม่ reset ตัวขึ้นบรรทัดระหว่างแท็กใน HTML ตาราง
+        // จะกลายเป็นช่องว่างจริง ทำให้หัวตารางหลุดจากตัวและมีร่องคั่นทุกช่อง
+        whiteSpace: 'normal'
       },
       '.cm-lm-table table': {
         margin: '4px 0'
+      },
+      // เซลล์แก้ไขได้ — ช่องว่างก็ต้องกว้าง/สูงพอให้คลิกเข้าไปพิมพ์ได้
+      '.cm-lm-table th, .cm-lm-table td': {
+        minWidth: '3.5em',
+        height: '2.1em',
+        cursor: 'text'
+      },
+      '.cm-lm-table th:focus, .cm-lm-table td:focus': {
+        outline: '2px solid var(--accent)',
+        outlineOffset: '-2px',
+        background: 'var(--accent-soft)'
+      },
+      '.cm-lm-table-raw': {
+        position: 'absolute',
+        top: '6px',
+        right: '4px',
+        padding: '1px 8px',
+        fontSize: '10px',
+        fontFamily: 'inherit',
+        color: 'var(--text-soft)',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        opacity: '0',
+        transition: 'opacity 0.15s'
+      },
+      '.cm-lm-table:hover .cm-lm-table-raw': {
+        opacity: '1'
       },
       '.cm-lm-table-fix': {
         display: 'inline-block',

@@ -1,21 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FolderCog, FolderPlus, Plus, RotateCcw } from 'lucide-react';
 import { noteGroupName, notesSupported } from '../lib/noteService';
 import type { NoteMeta } from '../lib/noteService';
 import { useDocStore } from '../store/docStore';
 import { useNotesStore } from '../store/notesStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { NotesGroup } from './notes/NotesGroup';
 import { useNotesRoot } from './notes/useNotesRoot';
 
 interface NotesSidebarProps {
   onOpenNote: (note: NoteMeta) => void;
   onCreateNote: (groupName?: string) => void;
+  width: number;
+  onResize: (width: number) => void;
 }
 
-export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
+export function NotesSidebar({ onOpenNote, onCreateNote, width, onResize }: NotesSidebarProps) {
   const { groups, loaded, selectedGroup, refresh, addGroup } = useNotesStore();
+  const hiddenPaths = useSettingsStore((state) => state.hiddenPaths);
   const activeNotePath = useDocStore((state) => state.notePath);
   const { rootDir, hasCustomRoot, applyNotesRoot, changeRootViaDialog } = useNotesRoot();
+
+  // ตัดกลุ่ม/โน้ตที่ผู้ใช้ซ่อนออกจากรายการ — ไฟล์จริงยังอยู่ ยกเลิกซ่อนได้จากแผงรายการที่ซ่อน
+  const visibleGroups = useMemo(() => {
+    if (hiddenPaths.length === 0) return groups;
+    const hidden = new Set(hiddenPaths);
+    return groups
+      .filter((group) => !hidden.has(group.path))
+      .map((group) => ({ ...group, notes: group.notes.filter((note) => !hidden.has(note.path)) }));
+  }, [groups, hiddenPaths]);
   // สถานะลากวางข้ามกลุ่ม — ต้องอยู่ระดับ sidebar เพราะกลุ่มต้นทาง/ปลายทางเป็นคนละ component
   const [dragNote, setDragNote] = useState<{ note: NoteMeta; fromGroup: string } | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
@@ -41,6 +54,18 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
   const endDrag = () => {
     setDragNote(null);
     setDragOverGroup(null);
+  };
+
+  const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const resize = (moveEvent: PointerEvent) => onResize(width + moveEvent.clientX - startX);
+    const stop = () => {
+      window.removeEventListener('pointermove', resize);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', resize);
+    window.addEventListener('pointerup', stop);
   };
 
   return (
@@ -72,11 +97,11 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
           </p>
         )}
 
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <NotesGroup
             key={group.path}
             group={group}
-            allGroups={groups}
+            allGroups={visibleGroups}
             onOpenNote={onOpenNote}
             onCreateNote={onCreateNote}
             draggedNote={dragNote?.note ?? null}
@@ -109,6 +134,7 @@ export function NotesSidebar({ onOpenNote, onCreateNote }: NotesSidebarProps) {
           </button>
         )}
       </div>
+      <div className="notes-resize-handle" role="separator" aria-orientation="vertical" onPointerDown={beginResize} />
     </aside>
   );
 }

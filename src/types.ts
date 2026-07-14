@@ -22,4 +22,6 @@ export interface EditorApi {
   focus: () => void;
   getSelection: () => { from: number; to: number };
   replaceContent: (content: string, selectionStart?: number, selectionEnd?: number) => void;
+  // พาไปพิมพ์ช่องแรกของกริดตารางที่ตำแหน่งนั้น (โหมด full หลังแทรกตาราง — โหมดอื่นเป็น no-op)
+  focusTableCellAt: (pos: number) => void;
 }

@@ -8,16 +8,21 @@ const blankLine = /^\s*$/;
 
 type Alignment = 'none' | 'left' | 'right' | 'center';
 
-/** แยกเซลล์จากบรรทัดตาราง — เคารพ \| ที่ escape ไว้ในเนื้อเซลล์ */
-function parseCells(line: string): string[] {
+/** แยกเซลล์จากบรรทัดตาราง — เคารพ \| ที่ escape ไว้ในเนื้อเซลล์ (ใช้ร่วมกับกริดแก้ตารางใน liveMarkdown) */
+export function parseCells(line: string): string[] {
   let body = line.trim();
   if (body.startsWith('|')) body = body.slice(1);
   body = body.replace(/(?<!\\)\|\s*$/, '');
   return body.split(/(?<!\\)\|/).map((cell) => cell.trim());
 }
 
-function isSeparatorRow(cells: string[]): boolean {
+export function isSeparatorRow(cells: string[]): boolean {
   return cells.length > 0 && cells.every((cell) => separatorCell.test(cell));
+}
+
+/** ประกอบบรรทัดตาราง `| a | b |` จากทุกเซลล์ที่เป็นค่า `cell` เดียวกัน — ใช้สร้างแถวว่าง ('   ') หรือแถวคั่น ('---') */
+export function tableRowOf(cols: number, cell: string): string {
+  return `| ${Array.from({ length: cols }, () => cell).join(' | ')} |`;
 }
 
 function alignmentOf(cell: string): Alignment {

@@ -7,3 +7,6 @@ src-tauri/gen
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# เอกสารภายในระหว่างพัฒนา — เก็บไว้ในเครื่องเท่านั้น ไม่ต้องขึ้น git
+project_overview

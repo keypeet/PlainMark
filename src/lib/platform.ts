@@ -22,3 +22,7 @@ export function tauriWindow() {
 export function tauriWebview() {
   return import('@tauri-apps/api/webview');
 }
+
+export function tauriCore() {
+  return import('@tauri-apps/api/core');
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
   Eye,
+  EyeOff,
   FilePlus2,
   FolderOpen,
   Moon,
@@ -13,6 +14,7 @@ import {
   Sun
 } from 'lucide-react';
 import { EditorPane } from './components/EditorPane';
+import { HiddenItemsPanel } from './components/HiddenItemsPanel';
 import { NotesSidebar } from './components/NotesSidebar';
 import { PreviewPane } from './components/PreviewPane';
 import { Toolbar } from './components/Toolbar';
@@ -35,15 +37,29 @@ function themeLabel(theme: ThemeMode): string {
   return 'System';
 }
 
+function automaticNoteTitle(content: string): string | null {
+  const firstLine = content
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^#{1,6}\s+/, ''))
+    .find(Boolean);
+  if (!firstLine) return null;
+  const cleanTitle = firstLine.replace(/[*_`]/g, '').trim();
+  return cleanTitle ? Array.from(cleanTitle).slice(0, 30).join('') : null;
+}
+
 export default function App() {
   const editorRef = useRef<EditorApi | null>(null);
   const [notice, setNotice] = useState('');
+  // แถบข้างซ้ายแสดงอะไร: รายการโน้ตปกติ หรือรายการที่ซ่อนไว้ (เริ่มที่โน้ตเสมอ)
+  const [sidebarView, setSidebarView] = useState<'notes' | 'hidden'>('notes');
   const { content, file, notePath, dirty, setContent, setFile, setNotePath, markSaved, newDocument } = useDocStore();
-  const { layout, theme, sidebarOpen, setLayout, setTheme, toggleSidebar, addRecentFile } = useSettingsStore();
-  const html = useRenderedMarkdown(content);
+  const { layout, theme, sidebarOpen, sidebarWidth, setLayout, setTheme, toggleSidebar, setSidebarWidth, addRecentFile } =
+    useSettingsStore();
+  const html = useRenderedMarkdown(content, file.path);
 
   const visible = useMemo(
     () => ({
+      // full = editor ที่เปิด live markdown (แก้ไขได้) — ไม่ใช่ preview ที่อ่านอย่างเดียว
       editor: layout === 'split' || layout === 'editor' || layout === 'full',
       preview: layout === 'split' || layout === 'preview'
     }),
@@ -54,6 +70,19 @@ export default function App() {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 1800);
   }, []);
+
+  // ปุ่ม activity bar: กดซ้ำมุมมองที่เปิดอยู่ = ปิดแถบข้าง, กดมุมมองอื่น = สลับไปมุมมองนั้นแล้วเปิดแถบถ้ายังปิดอยู่
+  const showSidebarView = useCallback(
+    (view: 'notes' | 'hidden') => {
+      if (sidebarOpen && sidebarView === view) {
+        toggleSidebar();
+        return;
+      }
+      setSidebarView(view);
+      if (!sidebarOpen) toggleSidebar();
+    },
+    [sidebarOpen, sidebarView, toggleSidebar]
+  );
 
   const changeZoom = useAppZoom(showNotice);
   useSessionPersistence();
@@ -147,6 +176,21 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // โน้ตใหม่มีชื่อเริ่มต้นภาษาอังกฤษ แล้วใช้บรรทัดแรกเป็นชื่ออัตโนมัติเมื่อผู้ใช้เริ่มพิมพ์
+  useEffect(() => {
+    if (!notePath || !/^new note(?: \(\d+\))?\.md$/i.test(file.name)) return;
+    const title = automaticNoteTitle(content);
+    if (!title) return;
+    const timer = window.setTimeout(() => {
+      void useNotesStore.getState().renameNoteAt(notePath, title).then((renamed) => {
+        if (!renamed || useDocStore.getState().notePath !== notePath) return;
+        setNotePath(renamed.path);
+        setFile({ path: renamed.path, name: `${renamed.name}.md` });
+      });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [content, file.name, notePath, setFile, setNotePath]);
+
   return (
     <div className="app-shell">
       <header className="menubar">
@@ -185,22 +229,46 @@ export default function App() {
           ))}
         </div>
 
-        <button
-          className={`icon-command ${sidebarOpen ? 'active' : ''}`}
-          title="โน้ตของฉัน"
-          onClick={toggleSidebar}
-        >
-          <NotebookTabs size={17} />
-        </button>
-
-        <button className="icon-command" title={`Theme: ${themeLabel(theme)}`} onClick={cycleTheme}>
-          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
       </header>
 
-      <main className={`workspace layout-${layout} ${sidebarOpen ? 'with-notes' : ''}`}>
-        {sidebarOpen && <NotesSidebar onOpenNote={(note) => void openNote(note)} onCreateNote={(group) => void createNote(group)} />}
-        {visible.editor && <EditorPane ref={editorRef} fullMode={layout === 'full'} />}
+      <main
+        className={`workspace layout-${layout} ${sidebarOpen ? 'with-notes' : ''}`}
+        style={{ '--notes-width': `${sidebarWidth}px` } as React.CSSProperties}
+      >
+        <aside className="activity-bar" aria-label="Workspace controls">
+          <button
+            className={`activity-button ${sidebarOpen && sidebarView === 'notes' ? 'active' : ''}`}
+            title="โน้ตของฉัน"
+            aria-label="โน้ตของฉัน"
+            onClick={() => showSidebarView('notes')}
+          >
+            <NotebookTabs size={19} />
+          </button>
+          <button
+            className={`activity-button ${sidebarOpen && sidebarView === 'hidden' ? 'active' : ''}`}
+            title="รายการที่ซ่อน (ดู/ยกเลิกซ่อนโน้ตและกลุ่ม)"
+            aria-label="รายการที่ซ่อน"
+            onClick={() => showSidebarView('hidden')}
+          >
+            <EyeOff size={19} />
+          </button>
+          <div className="activity-spacer" />
+          <button className="activity-button" title={`Theme: ${themeLabel(theme)}`} onClick={cycleTheme}>
+            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+        </aside>
+        {sidebarOpen &&
+          (sidebarView === 'hidden' ? (
+            <HiddenItemsPanel />
+          ) : (
+            <NotesSidebar
+              onOpenNote={(note) => void openNote(note)}
+              onCreateNote={(group) => void createNote(group)}
+              width={sidebarWidth}
+              onResize={setSidebarWidth}
+            />
+          ))}
+        {visible.editor && <EditorPane ref={editorRef} documentPath={file.path} fullMode={layout === 'full'} />}
         {visible.preview && <PreviewPane html={html} />}
         <Toolbar editorRef={editorRef} />
       </main>

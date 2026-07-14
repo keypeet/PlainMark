@@ -133,31 +133,67 @@ button {
 .workspace {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr) 58px;
+  grid-template-columns: 48px minmax(320px, 1fr) minmax(320px, 1fr) 58px;
   flex: 1;
   min-height: 0;
 }
 
 .workspace.layout-editor {
-  grid-template-columns: minmax(320px, 1fr) 58px;
+  grid-template-columns: 48px minmax(320px, 1fr) 58px;
 }
 
 .workspace.layout-preview {
-  grid-template-columns: minmax(320px, 1fr) 58px;
+  grid-template-columns: 48px minmax(320px, 1fr) 58px;
 }
 
 .workspace.layout-full {
-  grid-template-columns: minmax(320px, 1fr) 58px;
+  grid-template-columns: 48px minmax(320px, 1fr) 58px;
 }
 
 .workspace.with-notes {
-  grid-template-columns: 264px minmax(280px, 1fr) minmax(280px, 1fr) 58px;
+  grid-template-columns: 48px var(--notes-width, 280px) minmax(280px, 1fr) minmax(280px, 1fr) 58px;
 }
 
 .workspace.layout-editor.with-notes,
 .workspace.layout-preview.with-notes,
 .workspace.layout-full.with-notes {
-  grid-template-columns: 264px minmax(320px, 1fr) 58px;
+  grid-template-columns: 48px var(--notes-width, 280px) minmax(320px, 1fr) 58px;
+}
+
+.activity-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+}
+
+.activity-spacer {
+  flex: 1;
+}
+
+.activity-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-soft);
+  background: transparent;
+  cursor: pointer;
+}
+
+.activity-button:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.activity-button.active {
+  color: #fff;
+  background: var(--accent);
 }
 
 .pane {
@@ -198,6 +234,150 @@ button {
   flex-shrink: 0;
 }
 
+.pane-header-spacer {
+  flex: 1;
+}
+
+/* ---------- ประวัติเวอร์ชันโน้ต ---------- */
+.note-history {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.history-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  font-size: 11px;
+  color: var(--text-soft);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.history-button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.history-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 320px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+}
+
+.history-title {
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.history-empty {
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 2px;
+  border-top: 1px solid var(--border);
+}
+
+/* แถวตั้งค่ารอบเก็บ/จำนวนเวอร์ชันในแผงประวัติ */
+.history-settings {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.history-settings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-settings input {
+  width: 44px;
+  padding: 2px 4px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.history-time {
+  padding: 0;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.history-time:hover,
+.history-time.active {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* กล่องดูเนื้อหาเวอร์ชันเก่าก่อนตัดสินใจกู้คืน */
+.history-preview {
+  max-height: 160px;
+  margin: 0 0 6px;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.history-restore {
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.history-restore:hover {
+  color: #fff;
+  background: var(--accent);
+}
+
 .editor-host {
   position: relative;
   flex: 1;
@@ -207,6 +387,24 @@ button {
 
 .editor-host .cm-editor {
   height: 100%;
+}
+
+/* Full mode — editor ที่แต่งให้ใกล้ Preview (สไตล์ Typora): ไม่มีเลขบรรทัด ฟอนต์อ่านสบาย คอลัมน์กลาง
+   แต่ยังเป็น CodeMirror ที่พิมพ์แก้ไขได้ปกติ */
+.editor-pane.full-mode .cm-gutters {
+  display: none;
+}
+
+.editor-pane.full-mode .cm-content {
+  font-family: var(--sans);
+  font-size: 14.5px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 32px 120px;
+}
+
+.editor-pane.full-mode .cm-scroller {
+  background: var(--surface-2);
 }
 
 .cm-image-chip {
@@ -358,11 +556,28 @@ button {
 }
 
 .notes-sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--bg-soft);
   border-right: 1px solid var(--border);
+}
+
+.notes-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 5;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.notes-resize-handle:hover,
+.notes-resize-handle:active {
+  background: var(--accent);
 }
 
 .notes-head {
@@ -593,6 +808,41 @@ button {
   background: #dc2626;
 }
 
+/* แถวในแผง "รายการที่ซ่อน" */
+.hidden-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  border-radius: 7px;
+}
+
+.hidden-item:hover {
+  background: var(--accent-soft);
+}
+
+.hidden-item svg {
+  flex-shrink: 0;
+  color: var(--text-soft);
+}
+
+.hidden-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hidden-item-detail {
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-soft);
+}
+
 .notes-move-select {
   position: absolute;
   right: 4px;
@@ -769,11 +1019,11 @@ button {
   .workspace.layout-editor,
   .workspace.layout-preview,
   .workspace.layout-full {
-    grid-template-columns: minmax(0, 1fr) 52px;
+    grid-template-columns: 44px minmax(0, 1fr) 52px;
   }
 
   .workspace.layout-split {
-    grid-template-columns: minmax(0, 1fr) 52px;
+    grid-template-columns: 44px minmax(0, 1fr) 52px;
   }
 
   .layout-split .preview-pane {
@@ -784,7 +1034,7 @@ button {
   .workspace.layout-editor.with-notes,
   .workspace.layout-preview.with-notes,
   .workspace.layout-full.with-notes {
-    grid-template-columns: minmax(0, 1fr) 52px;
+    grid-template-columns: 44px minmax(0, 1fr) 52px;
   }
 
   .workspace.with-notes .notes-sidebar {

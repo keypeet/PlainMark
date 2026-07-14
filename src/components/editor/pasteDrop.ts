@@ -3,15 +3,18 @@
 // URL ยาวเดี่ยวๆ → ย่อเป็น reference-style
 import { EditorView } from '@codemirror/view';
 import { insertReferenceLink, longUrlThreshold } from '../../lib/formatActions';
-import { embedImageReference, isImageFile, readImageAsDataUrl } from '../../lib/imagePaste';
+import { embedImageAsset, embedImageReference, isImageFile, readImageAsDataUrl } from '../../lib/imagePaste';
+import { saveImageAsset } from '../../lib/imageAssets';
 import { convertClipboardHtml } from '../../lib/pasteConvert';
 
 const imageUrlPattern = /\.(png|jpe?g|gif|webp|svg|bmp|ico)(\?\S*)?$/i;
 
 // ฝังรูปเป็น base64 reference-style ที่ตำแหน่ง cursor (ใช้ร่วมกันทั้ง paste และ drop)
-async function insertImageFile(view: EditorView, file: File): Promise<void> {
-  const dataUrl = await readImageAsDataUrl(file);
-  const result = embedImageReference(view.state.doc.toString(), view.state.selection.main.from, dataUrl);
+async function insertImageFile(view: EditorView, file: File, documentPath: string | null): Promise<void> {
+  const relativePath = await saveImageAsset(file, documentPath);
+  const result = relativePath
+    ? embedImageAsset(view.state.doc.toString(), view.state.selection.main.from, relativePath)
+    : embedImageReference(view.state.doc.toString(), view.state.selection.main.from, await readImageAsDataUrl(file));
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: result.content },
     selection: { anchor: result.selectionStart },
@@ -20,7 +23,11 @@ async function insertImageFile(view: EditorView, file: File): Promise<void> {
 }
 
 // ผูก listener กับ editor host คืนฟังก์ชันถอด listener (ใช้เป็น cleanup ของ useEffect)
-export function attachPasteDrop(root: HTMLElement, getView: () => EditorView | null): () => void {
+export function attachPasteDrop(
+  root: HTMLElement,
+  getView: () => EditorView | null,
+  getDocumentPath: () => string | null
+): () => void {
   const handlePaste = async (event: ClipboardEvent) => {
     const view = getView();
     if (!view) return;
@@ -31,7 +38,7 @@ export function attachPasteDrop(root: HTMLElement, getView: () => EditorView | n
     const file = item?.getAsFile();
     if (file) {
       event.preventDefault();
-      await insertImageFile(view, file);
+      await insertImageFile(view, file, getDocumentPath());
       return;
     }
 
@@ -93,7 +100,7 @@ export function attachPasteDrop(root: HTMLElement, getView: () => EditorView | n
     const view = getView();
     if (!file || !view) return;
     event.preventDefault();
-    await insertImageFile(view, file);
+    await insertImageFile(view, file, getDocumentPath());
   };
 
   root.addEventListener('paste', handlePaste);

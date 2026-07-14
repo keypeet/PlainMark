@@ -36,7 +36,11 @@ export function Toolbar({ editorRef }: ToolbarProps) {
     (toolId: ToolId) => {
       const editor = editorRef.current;
       if (!editor) return;
-      applyResult(runTool(toolId, content, editor.getSelection()));
+      const selection = editor.getSelection();
+      applyResult(runTool(toolId, content, selection));
+      // แทรกตารางใหม่ → พาไปพิมพ์ช่องแรกของกริดเลย (บล็อกตารางเริ่มหลัง \n ที่แทรกนำ 1 ตัว)
+      // กรณีอื่น (จัดตารางเดิม/ไม่ใช่โหมด full) ไม่มีกริดที่ตำแหน่งนั้น — เป็น no-op
+      if (toolId === 'table') editor.focusTableCellAt(selection.from + 1);
     },
     [applyResult, content, editorRef]
   );
@@ -44,7 +48,9 @@ export function Toolbar({ editorRef }: ToolbarProps) {
   const insertTable = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    applyResult(createTable(content, editor.getSelection(), tableRows, tableCols));
+    const selection = editor.getSelection();
+    applyResult(createTable(content, selection, tableRows, tableCols));
+    editor.focusTableCellAt(selection.from + 1);
     setPopover(null);
   }, [applyResult, content, editorRef, tableCols, tableRows]);
 

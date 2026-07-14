@@ -11,12 +11,13 @@ export interface GroupMeta {
 }
 
 import { useSettingsStore } from '../store/settingsStore';
+import { pad2 } from './dateFormat';
 import { hasTauri, tauriFs, tauriPath } from './platform';
 import { baseName, pathSegments } from './paths';
 
 export const notesSupported = hasTauri;
 
-const noteExtension = '.md';
+export const noteExtension = '.md';
 const rootFolderName = 'PlainMark';
 
 async function fsApi() {
@@ -49,7 +50,7 @@ export function noteGroupName(notePath: string): string | null {
 }
 
 // ชื่อโน้ต = ชื่อไฟล์ตัด .md ออก
-function noteNameFromPath(notePath: string): string {
+export function noteNameFromPath(notePath: string): string {
   return baseName(notePath).slice(0, -noteExtension.length);
 }
 
@@ -135,7 +136,7 @@ export async function createGroup(name: string): Promise<string> {
 export async function createNote(groupName?: string, title?: string): Promise<NoteMeta> {
   const { fs } = await fsApi();
   const groupPath = await createGroup(groupName ?? todayGroupName());
-  const baseName = sanitizeName(title ?? 'โน้ตใหม่', 'โน้ตใหม่');
+  const baseName = sanitizeName(title ?? 'new note', 'new note');
   const notePath = await uniquePath(groupPath, baseName, noteExtension);
   await fs.writeTextFile(notePath, '');
   return { name: noteNameFromPath(notePath), path: notePath, modifiedAt: Date.now() };
@@ -144,6 +145,115 @@ export async function createNote(groupName?: string, title?: string): Promise<No
 export async function readNote(notePath: string): Promise<string> {
   const { fs } = await fsApi();
   return fs.readTextFile(notePath);
+}
+
+// ---------- ประวัติเวอร์ชัน (snapshot) ----------
+// เก็บสำเนาโน้ตเป็นระยะไว้ที่ <กลุ่ม>\.history\<ชื่อโน้ต>\<เวลา>.md
+// เผื่อผู้ใช้อยากรีเซตทั้งโน้ตกลับเป็นเวอร์ชันเก่า (คนละชั้นกับ Ctrl+Z ที่เป็น undo ใน session)
+
+export interface SnapshotMeta {
+  path: string;
+  savedAt: number; // epoch ms — แปลงจากชื่อไฟล์ ไม่ต้อง stat
+}
+
+const historyDirName = '.history';
+// รอบเวลา/จำนวนที่เก็บ ปรับได้ในแผงประวัติ — อ่านสดจาก settings ทุกครั้งเพื่อให้ค่าที่แก้มีผลทันที
+const snapshotKeep = () => useSettingsStore.getState().historyKeep;
+const snapshotIntervalMs = () => useSettingsStore.getState().historyIntervalMin * 60 * 1000;
+const lastSnapshotAt = new Map<string, number>();
+
+async function noteHistoryDir(notePath: string): Promise<string> {
+  const { path } = await fsApi();
+  return path.join(await path.dirname(notePath), historyDirName, noteNameFromPath(notePath));
+}
+
+// ชื่อไฟล์ snapshot = เวลาที่เก็บ (อ่านง่ายเวลาเปิดดูใน File Explorer และ parse กลับได้)
+function snapshotFileName(now: Date): string {
+  const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  const time = `${pad2(now.getHours())}-${pad2(now.getMinutes())}-${pad2(now.getSeconds())}`;
+  return `${date} ${time}${noteExtension}`;
+}
+
+function snapshotTimeFromName(fileName: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2})-(\d{2})-(\d{2})\.md$/.exec(fileName);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match.map(Number);
+  return new Date(year, month - 1, day, hour, minute, second).getTime();
+}
+
+export async function listSnapshots(notePath: string): Promise<SnapshotMeta[]> {
+  const { path, fs } = await fsApi();
+  const dir = await noteHistoryDir(notePath);
+  if (!(await fs.exists(dir))) return [];
+  const snapshots: SnapshotMeta[] = [];
+  for (const entry of await fs.readDir(dir)) {
+    if (!entry.isFile) continue;
+    const savedAt = snapshotTimeFromName(entry.name);
+    if (savedAt === null) continue;
+    snapshots.push({ path: await path.join(dir, entry.name), savedAt });
+  }
+  return snapshots.sort((a, b) => b.savedAt - a.savedAt);
+}
+
+export async function readSnapshot(snapshotPath: string): Promise<string> {
+  const { fs } = await fsApi();
+  return fs.readTextFile(snapshotPath);
+}
+
+// เก็บ snapshot ทันที (ใช้ก่อนกู้คืนเวอร์ชัน และจากรอบ autosave) แล้วตัดของเก่าเกินโควตา
+export async function saveSnapshot(notePath: string, content: string): Promise<void> {
+  if (!content.trim()) return; // เนื้อหาว่างไม่มีค่าพอให้เก็บ
+  const { path, fs } = await fsApi();
+  const dir = await noteHistoryDir(notePath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeTextFile(await path.join(dir, snapshotFileName(new Date())), content);
+  lastSnapshotAt.set(notePath, Date.now());
+  for (const stale of (await listSnapshots(notePath)).slice(snapshotKeep())) {
+    try {
+      await fs.remove(stale.path);
+    } catch {
+      // ลบไม่ได้ก็แค่ค้างไว้ รอบหน้าลองใหม่
+    }
+  }
+}
+
+// เรียกก่อน autosave ทับไฟล์: ถึงรอบเวลาแล้วค่อยเก็บของเดิมบนดิสก์เข้าประวัติ (กัน snapshot ถี่เกิน)
+async function maybeSnapshotBeforeWrite(notePath: string): Promise<void> {
+  const last = lastSnapshotAt.get(notePath) ?? 0;
+  if (Date.now() - last < snapshotIntervalMs()) return;
+  lastSnapshotAt.set(notePath, Date.now()); // กันรีเช็คถี่แม้อ่านไฟล์พลาด
+  try {
+    const { fs } = await fsApi();
+    const current = await fs.readTextFile(notePath);
+    if (!current.trim()) return;
+    const [newest] = await listSnapshots(notePath);
+    if (newest && (await readSnapshot(newest.path)) === current) return; // ไม่ต่างจากล่าสุด — ไม่เก็บซ้ำ
+    await saveSnapshot(notePath, current);
+  } catch (error) {
+    console.error('PlainMark: snapshot failed', error);
+  }
+}
+
+// โฟลเดอร์ประวัติผูกกับชื่อ/ที่อยู่โน้ต — ย้ายตามเมื่อเปลี่ยนชื่อหรือย้ายกลุ่ม (พลาดได้ไม่ถือว่า fatal)
+async function relocateNoteHistory(
+  path: Awaited<ReturnType<typeof fsApi>>['path'],
+  fs: Awaited<ReturnType<typeof fsApi>>['fs'],
+  sourceNotePath: string,
+  targetNotePath: string,
+  oldNoteName: string,
+  nextNoteName: string
+): Promise<void> {
+  try {
+    const oldDir = await path.join(await path.dirname(sourceNotePath), historyDirName, oldNoteName);
+    const nextParent = await path.join(await path.dirname(targetNotePath), historyDirName);
+    const nextDir = await path.join(nextParent, nextNoteName);
+    if (oldDir === nextDir || !(await fs.exists(oldDir)) || (await fs.exists(nextDir))) return;
+    await fs.mkdir(nextParent, { recursive: true });
+    await fs.rename(oldDir, nextDir);
+    lastSnapshotAt.delete(sourceNotePath);
+  } catch (error) {
+    console.error('PlainMark: move history failed', error);
+  }
 }
 
 // เขียนโน้ตแบบเรียงคิว latest-wins ต่อไฟล์ ให้ flushNoteWrites() await ได้ตอนปิดแอป
@@ -158,6 +268,7 @@ export function writeNoteQueued(notePath: string, content: string): Promise<void
       if (snapshot === undefined) return;
       notePending.delete(notePath);
       const { fs } = await fsApi();
+      await maybeSnapshotBeforeWrite(notePath); // เก็บของเดิมบนดิสก์เข้าประวัติตามรอบเวลา ก่อนถูกทับ
       await fs.writeTextFile(notePath, snapshot);
     })
     .catch((error) => {
@@ -182,6 +293,8 @@ export async function renameNote(notePath: string, newTitle: string): Promise<No
   const target = await uniquePath(dir, nextName, noteExtension);
   await flushNoteWrites();
   await fs.rename(notePath, target);
+  await relocateNoteAssets(path, fs, notePath, target, currentName, noteNameFromPath(target));
+  await relocateNoteHistory(path, fs, notePath, target, currentName, noteNameFromPath(target));
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
   return { name: noteNameFromPath(target), path: target, modifiedAt: Date.now() };
@@ -199,21 +312,55 @@ export async function renameGroup(groupPath: string, newName: string): Promise<s
 }
 
 export async function moveNote(notePath: string, targetGroupName: string): Promise<NoteMeta> {
-  const { fs } = await fsApi();
+  const { path, fs } = await fsApi();
   const groupPath = await createGroup(targetGroupName);
   const noteName = noteNameFromPath(notePath);
   const target = await uniquePath(groupPath, noteName, noteExtension);
   await flushNoteWrites();
   await fs.rename(notePath, target);
+  await relocateNoteAssets(path, fs, notePath, target, noteName, noteNameFromPath(target));
+  await relocateNoteHistory(path, fs, notePath, target, noteName, noteNameFromPath(target));
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
   return { name: noteName, path: target, modifiedAt: Date.now() };
+}
+
+// โฟลเดอร์รูปมีชื่อสัมพันธ์กับชื่อโน้ต จึงต้องย้ายและแก้ลิงก์ใน Markdown ทุกครั้งที่ชื่อ/กลุ่มเปลี่ยน
+async function relocateNoteAssets(
+  path: Awaited<ReturnType<typeof fsApi>>['path'],
+  fs: Awaited<ReturnType<typeof fsApi>>['fs'],
+  sourceNotePath: string,
+  targetNotePath: string,
+  oldNoteName: string,
+  nextNoteName: string
+): Promise<void> {
+  const oldAssetsName = `${oldNoteName}.assets`;
+  const nextAssetsName = `${nextNoteName}.assets`;
+  if (oldAssetsName === nextAssetsName && sourceNotePath === targetNotePath) return;
+
+  const sourceDir = await path.dirname(sourceNotePath);
+  const targetDir = await path.dirname(targetNotePath);
+  const oldAssets = await path.join(sourceDir, oldAssetsName);
+  const nextAssets = await path.join(targetDir, nextAssetsName);
+  if (!(await fs.exists(oldAssets))) return;
+  if (await fs.exists(nextAssets)) throw new Error(`พบโฟลเดอร์รูปปลายทางอยู่แล้ว: ${nextAssetsName}`);
+
+  await fs.rename(oldAssets, nextAssets);
+  const content = await fs.readTextFile(targetNotePath);
+  const nextContent = content
+    .split(encodeURIComponent(oldAssetsName))
+    .join(encodeURIComponent(nextAssetsName))
+    .split(oldAssetsName)
+    .join(nextAssetsName);
+  if (nextContent !== content) await fs.writeTextFile(targetNotePath, nextContent);
 }
 
 export async function deleteNote(notePath: string): Promise<void> {
   const { fs } = await fsApi();
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
+  lastSnapshotAt.delete(notePath);
+  // จงใจไม่ลบโฟลเดอร์ .history — เผื่อกู้เนื้อหาโน้ตที่เผลอลบ (แบบเดียวกับ .assets ที่คงไว้)
   await fs.remove(notePath);
 }
 
