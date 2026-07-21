@@ -1,6 +1,6 @@
 [package]
 name = "plainmark"
-version = "0.9.96"
+version = "0.9.97"
 description = "PlainMark desktop app"
 authors = ["PlainMark"]
 edition = "2021"

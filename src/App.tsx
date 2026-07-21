@@ -26,6 +26,7 @@ import { useSessionPersistence } from './hooks/useSessionPersistence';
 import { flushNoteWrites, noteGroupName, notesSupported, readNote, writeNoteQueued } from './lib/noteService';
 import type { NoteMeta } from './lib/noteService';
 import { exportTextFile, openTextFile, saveTextFile } from './lib/fileService';
+import { inlineNoteImages } from './lib/imageAssets';
 import { useDocStore } from './store/docStore';
 import { useNotesStore } from './store/notesStore';
 import { useSettingsStore } from './store/settingsStore';
@@ -159,10 +160,12 @@ export default function App() {
 
   const handleExport = useCallback(
     async (extension: 'md' | 'txt') => {
-      await exportTextFile(content, extension);
+      // export ไปให้คนอื่น: ฝังรูปเป็น base64 ในตัวไฟล์ md เลย ไม่ต้องแนบโฟลเดอร์ .assets ไปด้วย
+      const exportContent = extension === 'md' ? await inlineNoteImages(content, notePath ?? file.path) : content;
+      await exportTextFile(exportContent, extension);
       showNotice(`Exported .${extension}`);
     },
-    [content, showNotice]
+    [content, file.path, notePath, showNotice]
   );
 
   const cycleTheme = useCallback(() => {
