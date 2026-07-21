@@ -4,9 +4,23 @@ import { hasTauri, tauriWindow } from '../lib/platform';
 import { flushSession, loadSession, saveSession } from '../lib/session';
 import { useDocStore } from '../store/docStore';
 
+// snapshot ล่าสุดที่บันทึกไปแล้ว — ใช้เทียบเพื่อข้ามการเขียนซ้ำเมื่อไม่มีอะไรเปลี่ยน
+// (โดยเฉพาะรอบที่ตามหลัง markSaved ซึ่งเปลี่ยนแค่ dirty; session ที่ฝังรูป base64 ใหญ่ + เขียนผ่าน OneDrive ช้า)
+let lastPersisted: { content: string; filePath: string | null; fileName: string; notePath: string | null } | null = null;
+
 // รวบรวมสถานะปัจจุบันแล้วบันทึก session + เนื้อหาโน้ต (ถ้าเปิดโน้ตอยู่)
 function persistNow(): Promise<void> {
   const { content, file, notePath, dirty } = useDocStore.getState();
+  if (
+    lastPersisted &&
+    lastPersisted.content === content &&
+    lastPersisted.filePath === file.path &&
+    lastPersisted.fileName === file.name &&
+    lastPersisted.notePath === notePath
+  ) {
+    return Promise.resolve();
+  }
+  lastPersisted = { content, filePath: file.path, fileName: file.name, notePath };
   const tasks: Promise<void>[] = [
     saveSession({
       content,

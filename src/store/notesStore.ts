@@ -5,6 +5,7 @@ import {
   createNote,
   deleteGroup,
   deleteNote,
+  enqueueNoteOp,
   loadTree,
   moveNote,
   notesSupported,
@@ -30,14 +31,9 @@ interface NotesState {
   removeGroup: (groupPath: string) => Promise<void>;
 }
 
-export const useNotesStore = create<NotesState>((set, get) => ({
-  groups: [],
-  loaded: false,
-  selectedGroup: null,
-
-  selectGroup: (name) => set({ selectedGroup: name }),
-
-  refresh: async () => {
+export const useNotesStore = create<NotesState>((set, get) => {
+  // งานจริงของ refresh — ไม่เข้าคิวเอง เพื่อให้ action อื่นเรียกได้ภายใน enqueueNoteOp เดียวกัน (กัน deadlock re-entrant)
+  const refreshInternal = async () => {
     if (!notesSupported) {
       set({ groups: [], loaded: true });
       return;
@@ -57,63 +53,81 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       console.error('PlainMark: load notes tree failed', error);
       set({ loaded: true });
     }
-  },
+  };
 
-  addGroup: async (name) => {
-    await createGroup(name);
-    await get().refresh();
-  },
+  // ทุก action วิ่งผ่านคิวกลางเดียวกัน → ทำทีละงาน ไม่สลับจังหวะชนกันตอน I/O ช้า (OneDrive)
+  return {
+    groups: [],
+    loaded: false,
+    selectedGroup: null,
 
-  addNote: async (groupName, title) => {
-    try {
-      const note = await createNote(groupName, title);
-      await get().refresh();
-      return note;
-    } catch (error) {
-      console.error('PlainMark: create note failed', error);
-      return null;
-    }
-  },
+    selectGroup: (name) => set({ selectedGroup: name }),
 
-  renameNoteAt: async (notePath, newTitle) => {
-    try {
-      const note = await renameNote(notePath, newTitle);
-      await get().refresh();
-      return note;
-    } catch (error) {
-      console.error('PlainMark: rename note failed', error);
-      return null;
-    }
-  },
+    refresh: () => enqueueNoteOp(refreshInternal),
 
-  renameGroupAt: async (groupPath, newName) => {
-    const oldName = baseName(groupPath);
-    const newPath = await renameGroup(groupPath, newName);
-    // ถ้ากลุ่มที่เลือกอยู่คือกลุ่มที่ถูกเปลี่ยนชื่อ ให้การเลือกตามไปชื่อใหม่
-    if (get().selectedGroup === oldName) {
-      set({ selectedGroup: baseName(newPath) || null });
-    }
-    await get().refresh();
-  },
+    addGroup: (name) =>
+      enqueueNoteOp(async () => {
+        await createGroup(name);
+        await refreshInternal();
+      }),
 
-  moveNoteTo: async (notePath, targetGroupName) => {
-    try {
-      const note = await moveNote(notePath, targetGroupName);
-      await get().refresh();
-      return note;
-    } catch (error) {
-      console.error('PlainMark: move note failed', error);
-      return null;
-    }
-  },
+    addNote: (groupName, title) =>
+      enqueueNoteOp(async () => {
+        try {
+          const note = await createNote(groupName, title);
+          await refreshInternal();
+          return note;
+        } catch (error) {
+          console.error('PlainMark: create note failed', error);
+          return null;
+        }
+      }),
 
-  removeNote: async (notePath) => {
-    await deleteNote(notePath);
-    await get().refresh();
-  },
+    renameNoteAt: (notePath, newTitle) =>
+      enqueueNoteOp(async () => {
+        try {
+          const note = await renameNote(notePath, newTitle);
+          await refreshInternal();
+          return note;
+        } catch (error) {
+          console.error('PlainMark: rename note failed', error);
+          return null;
+        }
+      }),
 
-  removeGroup: async (groupPath) => {
-    await deleteGroup(groupPath);
-    await get().refresh();
-  }
-}));
+    renameGroupAt: (groupPath, newName) =>
+      enqueueNoteOp(async () => {
+        const oldName = baseName(groupPath);
+        const newPath = await renameGroup(groupPath, newName);
+        // ถ้ากลุ่มที่เลือกอยู่คือกลุ่มที่ถูกเปลี่ยนชื่อ ให้การเลือกตามไปชื่อใหม่
+        if (get().selectedGroup === oldName) {
+          set({ selectedGroup: baseName(newPath) || null });
+        }
+        await refreshInternal();
+      }),
+
+    moveNoteTo: (notePath, targetGroupName) =>
+      enqueueNoteOp(async () => {
+        try {
+          const note = await moveNote(notePath, targetGroupName);
+          await refreshInternal();
+          return note;
+        } catch (error) {
+          console.error('PlainMark: move note failed', error);
+          return null;
+        }
+      }),
+
+    removeNote: (notePath) =>
+      enqueueNoteOp(async () => {
+        await deleteNote(notePath);
+        await refreshInternal();
+      }),
+
+    removeGroup: (groupPath) =>
+      enqueueNoteOp(async () => {
+        await deleteGroup(groupPath);
+        await refreshInternal();
+      })
+  };
+});

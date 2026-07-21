@@ -297,10 +297,34 @@ button {
 .history-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   padding: 5px 2px;
   border-top: 1px solid var(--border);
+}
+
+/* ขนาดการแก้ไขของแต่ละเวอร์ชัน เทียบกับเวอร์ชันก่อนหน้า */
+.history-diff {
+  display: inline-flex;
+  gap: 5px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+}
+
+.history-diff em {
+  font-style: normal;
+}
+
+.diff-added {
+  color: #22863a;
+}
+
+.diff-removed {
+  color: #d1242f;
+}
+
+.diff-none {
+  color: var(--text-soft);
 }
 
 /* แถวตั้งค่ารอบเก็บ/จำนวนเวอร์ชันในแผงประวัติ */
@@ -364,6 +388,7 @@ button {
 }
 
 .history-restore {
+  margin-left: auto;
   padding: 2px 10px;
   font-size: 11px;
   color: var(--accent);
@@ -823,6 +848,10 @@ button {
   background: var(--accent-soft);
 }
 
+.hidden-item.active {
+  background: var(--accent-soft);
+}
+
 .hidden-item svg {
   flex-shrink: 0;
   color: var(--text-soft);
@@ -836,11 +865,29 @@ button {
   white-space: nowrap;
 }
 
+/* ปุ่มเปิดดูเนื้อหาโน้ตที่ซ่อน (แถวเดี่ยว ไม่ได้อยู่ในกลุ่มที่ซ่อน) — reset ให้ดูเหมือน label เดิม แต่คลิกได้ */
+.hidden-item-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .hidden-item-detail {
   display: block;
   font-size: 11px;
   font-style: normal;
   color: var(--text-soft);
+}
+
+.hidden-section-label {
+  margin: 10px 4px 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+  letter-spacing: 0.3px;
 }
 
 .notes-move-select {

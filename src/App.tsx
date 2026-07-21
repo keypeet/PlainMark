@@ -259,7 +259,7 @@ export default function App() {
         </aside>
         {sidebarOpen &&
           (sidebarView === 'hidden' ? (
-            <HiddenItemsPanel />
+            <HiddenItemsPanel onOpenNote={(note) => void openNote(note)} />
           ) : (
             <NotesSidebar
               onOpenNote={(note) => void openNote(note)}

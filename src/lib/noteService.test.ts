@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noteGroupName, sanitizeName, todayGroupName } from './noteService';
+import { enqueueNoteOp, noteGroupName, sanitizeName, todayGroupName } from './noteService';
 
 describe('sanitizeName', () => {
   it('strips characters Windows forbids in filenames', () => {
@@ -40,5 +40,25 @@ describe('todayGroupName', () => {
   it('formats as YYYY-MM-DD with zero padding', () => {
     expect(todayGroupName(new Date(2026, 6, 2))).toBe('2026-07-02');
     expect(todayGroupName(new Date(2026, 0, 9))).toBe('2026-01-09');
+  });
+});
+
+describe('enqueueNoteOp', () => {
+  it('รันงานทีละตัวเรียงคิว งานที่ช้าไม่โดนงานถัดไปแซง', async () => {
+    const order: string[] = [];
+    const slow = enqueueNoteOp(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push('a');
+    });
+    const fast = enqueueNoteOp(async () => {
+      order.push('b');
+    });
+    await Promise.all([slow, fast]);
+    expect(order).toEqual(['a', 'b']); // b ต้องรอ a เสร็จก่อน แม้ a ช้ากว่า
+  });
+
+  it('งานที่พังไม่ทำให้คิวค้าง งานถัดไปยังรันต่อได้', async () => {
+    await expect(enqueueNoteOp(async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    await expect(enqueueNoteOp(async () => 'ok')).resolves.toBe('ok');
   });
 });

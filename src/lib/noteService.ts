@@ -1,7 +1,8 @@
 export interface NoteMeta {
   name: string; // ชื่อโน้ต (ไม่มีนามสกุล .md)
   path: string;
-  modifiedAt: number;
+  // เวลาสร้างไฟล์ — ใช้จัดลำดับในแถบข้าง (ไม่ใช่เวลาแก้ไขล่าสุด) เพื่อไม่ให้ตำแหน่งขยับตอนพิมพ์/บันทึก
+  createdAt: number;
 }
 
 export interface GroupMeta {
@@ -88,27 +89,44 @@ export async function loadTree(): Promise<GroupMeta[]> {
   const root = await ensureNotesRoot();
   const rootEntries = await fs.readDir(root);
   const groups: GroupMeta[] = [];
+  const seenGroups = new Set<string>();
 
   for (const entry of rootEntries) {
-    if (!entry.isDirectory) continue;
+    // กันกลุ่มซ้ำ: OneDrive อาจคืน entry ชื่อเดียวกัน 2 ครั้งระหว่างซิงก์ → เห็นกลุ่มซ้ำบนจอ
+    if (!entry.isDirectory || seenGroups.has(entry.name)) continue;
+    seenGroups.add(entry.name);
     const groupPath = await path.join(root, entry.name);
     const noteEntries = await fs.readDir(groupPath);
-    const notes: NoteMeta[] = [];
+    const seenNotes = new Set<string>();
 
-    for (const noteEntry of noteEntries) {
-      if (!noteEntry.isFile || !noteEntry.name.toLowerCase().endsWith(noteExtension)) continue;
-      const notePath = await path.join(groupPath, noteEntry.name);
-      let modifiedAt = 0;
-      try {
-        const info = await fs.stat(notePath);
-        modifiedAt = info.mtime ? new Date(info.mtime).getTime() : 0;
-      } catch {
-        // stat พลาดไม่ใช่เรื่องใหญ่ — แค่เรียงลำดับหยาบลง
-      }
-      notes.push({ name: noteEntry.name.slice(0, -noteExtension.length), path: notePath, modifiedAt });
-    }
+    // อ่านเวลาสร้างพร้อมกันทุกไฟล์ด้วย Promise.all — stat ทีละไฟล์แบบ serial ช้าเชิงเส้น (ยิ่งช้าเมื่อผ่าน OneDrive)
+    const notes = (
+      await Promise.all(
+        noteEntries
+          .filter((noteEntry) => noteEntry.isFile && noteEntry.name.toLowerCase().endsWith(noteExtension))
+          .map(async (noteEntry) => {
+            const notePath = await path.join(groupPath, noteEntry.name);
+            let createdAt = 0;
+            try {
+              const info = await fs.stat(notePath);
+              // ใช้ birthtime (เวลาสร้าง) ไม่ใช่ mtime — กันโน้ตอื่นขยับตำแหน่งตอนโน้ตหนึ่งถูกแก้ไข/ลบ
+              // (mtime เปลี่ยนทุกครั้งที่ autosave ทำให้ลำดับ "เด้ง" โดยไม่คาดคิดตอน refresh ครั้งถัดไป)
+              const time = info.birthtime ?? info.mtime;
+              createdAt = time ? new Date(time).getTime() : 0;
+            } catch {
+              // stat พลาดไม่ใช่เรื่องใหญ่ — แค่เรียงลำดับหยาบลง
+            }
+            return { name: noteEntry.name.slice(0, -noteExtension.length), path: notePath, createdAt };
+          })
+      )
+    ).filter((note) => {
+      // กันโน้ตซ้ำ path เดียวกัน (เหตุผลเดียวกับกลุ่ม)
+      if (seenNotes.has(note.path)) return false;
+      seenNotes.add(note.path);
+      return true;
+    });
 
-    notes.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    notes.sort((a, b) => b.createdAt - a.createdAt);
     groups.push({ name: entry.name, path: groupPath, notes });
   }
 
@@ -139,7 +157,7 @@ export async function createNote(groupName?: string, title?: string): Promise<No
   const baseName = sanitizeName(title ?? 'new note', 'new note');
   const notePath = await uniquePath(groupPath, baseName, noteExtension);
   await fs.writeTextFile(notePath, '');
-  return { name: noteNameFromPath(notePath), path: notePath, modifiedAt: Date.now() };
+  return { name: noteNameFromPath(notePath), path: notePath, createdAt: Date.now() };
 }
 
 export async function readNote(notePath: string): Promise<string> {
@@ -256,6 +274,16 @@ async function relocateNoteHistory(
   }
 }
 
+// คิวกลางงานโครงสร้างโน้ต (สร้าง/เปลี่ยนชื่อ/ย้าย/ลบ/refresh) — บังคับทำทีละงานเรียงคิว
+// กัน race ตอน file I/O หน่วงไม่แน่นอน (เช่นเก็บบน OneDrive) ที่ทำให้ async chain ของแต่ละ action สลับจังหวะชนกัน
+// ผลพลอยได้: refresh สองครั้งทับซ้อนกันไม่ได้ → ไม่ต้องมี latest-wins token แยกอีก
+let noteOpChain: Promise<unknown> = Promise.resolve();
+export function enqueueNoteOp<T>(op: () => Promise<T>): Promise<T> {
+  const run = noteOpChain.then(op, op); // ต่อคิวไม่ว่างานก่อนหน้าจะสำเร็จหรือพัง
+  noteOpChain = run.catch(() => {}); // งานพังไม่ทำให้คิวค้าง
+  return run;
+}
+
 // เขียนโน้ตแบบเรียงคิว latest-wins ต่อไฟล์ ให้ flushNoteWrites() await ได้ตอนปิดแอป
 const noteWriteChains = new Map<string, Promise<void>>();
 const notePending = new Map<string, string>();
@@ -268,6 +296,9 @@ export function writeNoteQueued(notePath: string, content: string): Promise<void
       if (snapshot === undefined) return;
       notePending.delete(notePath);
       const { fs } = await fsApi();
+      // ไฟล์ถูก rename/ลบไปแล้ว — อย่า "สร้างผี" คืนที่ path เก่า (ต้นตอไฟล์ (2)/(3) งอก)
+      // โน้ตถูกสร้างครั้งแรกผ่าน createNote เสมอ ไฟล์จึงต้องมีอยู่ก่อนถ้า path ยัง valid
+      if (!(await fs.exists(notePath))) return;
       await maybeSnapshotBeforeWrite(notePath); // เก็บของเดิมบนดิสก์เข้าประวัติตามรอบเวลา ก่อนถูกทับ
       await fs.writeTextFile(notePath, snapshot);
     })
@@ -288,7 +319,7 @@ export async function renameNote(notePath: string, newTitle: string): Promise<No
   const currentName = noteNameFromPath(notePath);
   const nextName = sanitizeName(newTitle, 'untitled');
   if (nextName === currentName) {
-    return { name: currentName, path: notePath, modifiedAt: Date.now() };
+    return { name: currentName, path: notePath, createdAt: Date.now() };
   }
   const target = await uniquePath(dir, nextName, noteExtension);
   await flushNoteWrites();
@@ -297,7 +328,7 @@ export async function renameNote(notePath: string, newTitle: string): Promise<No
   await relocateNoteHistory(path, fs, notePath, target, currentName, noteNameFromPath(target));
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
-  return { name: noteNameFromPath(target), path: target, modifiedAt: Date.now() };
+  return { name: noteNameFromPath(target), path: target, createdAt: Date.now() };
 }
 
 export async function renameGroup(groupPath: string, newName: string): Promise<string> {
@@ -322,7 +353,7 @@ export async function moveNote(notePath: string, targetGroupName: string): Promi
   await relocateNoteHistory(path, fs, notePath, target, noteName, noteNameFromPath(target));
   noteWriteChains.delete(notePath);
   notePending.delete(notePath);
-  return { name: noteName, path: target, modifiedAt: Date.now() };
+  return { name: noteName, path: target, createdAt: Date.now() };
 }
 
 // โฟลเดอร์รูปมีชื่อสัมพันธ์กับชื่อโน้ต จึงต้องย้ายและแก้ลิงก์ใน Markdown ทุกครั้งที่ชื่อ/กลุ่มเปลี่ยน

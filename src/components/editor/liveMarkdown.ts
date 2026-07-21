@@ -3,6 +3,7 @@
 import type { EditorState, Extension, Range, Text } from '@codemirror/state';
 import { Facet, RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import hljs from 'highlight.js';
 import { renderMarkdown } from '../../lib/markdownEngine';
 import { hasTauri, tauriCore, tauriPath } from '../../lib/platform';
 import { fixTableBlock, isSeparatorRow, parseCells, tableRowOf } from '../../lib/tableFormat';
@@ -62,6 +63,22 @@ class BulletWidget extends WidgetType {
     const span = document.createElement('span');
     span.className = 'cm-lm-bullet';
     span.textContent = this.ordered ?? '•';
+    return span;
+  }
+}
+
+// แทนบรรทัด ```lang ตอนไม่ได้แก้ไข — เหลือแค่ป้ายชื่อภาษา ให้กล่องโค้ดดูสะอาดแบบ Typora
+class CodeFenceWidget extends WidgetType {
+  constructor(private readonly lang: string) {
+    super();
+  }
+  eq(other: CodeFenceWidget) {
+    return other.lang === this.lang;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-lm-code-lang';
+    span.textContent = this.lang || 'code';
     return span;
   }
 }
@@ -277,6 +294,112 @@ function buildDecorations(view: EditorView): DecorationSet {
   for (const decoration of decorations) builder.add(decoration.from, decoration.to, decoration.value);
   return builder.finish();
 }
+
+// ---------- โค้ดบล็อก (fenced code) ----------
+// บรรทัด ```lang / ``` เอง แสดงเป็นราวเมื่อ cursor อยู่บรรทัดนั้น (แก้ภาษา/ลบ block ได้ปกติ)
+// ไม่งั้นยุบเหลือป้ายชื่อภาษา ส่วนเนื้อโค้ดข้างในให้พื้นหลัง+ฟอนต์ monospace แบบกล่อง พร้อมสีไวยากรณ์จาก highlight.js
+// (คลาส hljs-* มาจากธีมเดียวกับที่ import ไว้ให้ Preview ใน main.tsx — สีจึงตรงกับโหมด Preview เป๊ะ)
+// ต่างจาก inline formatting (bold/italic ฯลฯ) ตรงที่ตัวไฮไลต์สีเป็นแค่ Decoration.mark (ไม่ลบตัวอักษร)
+// จึงเปิดให้เห็นตลอดได้แม้ cursor กำลังพิมพ์อยู่ในบล็อกนั้น ไม่ต้องรอ blur ก่อน
+
+/** ไฮไลต์โค้ดด้วย highlight.js แล้วแกะกลับเป็นช่วงตำแหน่ง (offset ในสตริง code) + ชื่อคลาส hljs-* */
+function highlightRanges(code: string, lang: string): { from: number; to: number; className: string }[] {
+  let html: string;
+  try {
+    html = lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
+  } catch {
+    return [];
+  }
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  const ranges: { from: number; to: number; className: string }[] = [];
+  let pos = 0;
+  const walk = (node: ChildNode, activeClass: string | null) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const length = node.textContent?.length ?? 0;
+      if (length > 0 && activeClass) ranges.push({ from: pos, to: pos + length, className: activeClass });
+      pos += length;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      // ใช้คลาสของ span ที่ลึกที่สุดที่ครอบตัวอักษรนั้น (ไม่ไล่ผสมกับคลาสของ span แม่)
+      const nextClass = el.className || activeClass;
+      el.childNodes.forEach((child) => walk(child, nextClass));
+    }
+  };
+  container.childNodes.forEach((node) => walk(node, null));
+  return ranges;
+}
+
+function buildCodeDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc;
+  const collected: Range<Decoration>[] = [];
+  const selectionRanges = state.selection.ranges;
+  let i = 1;
+
+  while (i <= doc.lines) {
+    const openLine = doc.line(i);
+    if (!fenceLine.test(openLine.text)) {
+      i += 1;
+      continue;
+    }
+    // หาบรรทัดปิดคู่กัน (บรรทัดถัดไปที่ match fence marker อีกครั้ง) — ยังไม่ปิดแปลว่าผู้ใช้กำลังพิมพ์อยู่ ปล่อย raw
+    let close = i + 1;
+    while (close <= doc.lines && !fenceLine.test(doc.line(close).text)) close += 1;
+    if (close > doc.lines) break;
+
+    const closeLine = doc.line(close);
+    const langMatch = /^\s*(?:```|~~~)\s*([\w+-]*)/.exec(openLine.text);
+    const lang = langMatch?.[1]?.trim() ?? '';
+    const openActive = cursorTouches(openLine.from, openLine.to, selectionRanges);
+    const closeActive = cursorTouches(closeLine.from, closeLine.to, selectionRanges);
+
+    for (let l = i; l <= close; l += 1) {
+      const isEdge = l === i || l === close;
+      collected.push(
+        Decoration.line({
+          class: isEdge
+            ? `cm-lm-code-fence ${l === i ? 'cm-lm-code-fence-open' : 'cm-lm-code-fence-close'}`
+            : 'cm-lm-code-line'
+        }).range(doc.line(l).from)
+      );
+    }
+
+    if (!openActive) {
+      collected.push(Decoration.replace({ widget: new CodeFenceWidget(lang) }).range(openLine.from, openLine.to));
+    }
+    if (!closeActive) {
+      collected.push(Decoration.replace({}).range(closeLine.from, closeLine.to));
+    }
+
+    // สีไวยากรณ์ของเนื้อโค้ด — คำนวณเสมอ (ไม่ผูกกับ active) เพราะเป็น mark ไม่ใช่การซ่อนตัวอักษร
+    if (close > i + 1) {
+      const contentFrom = doc.line(i + 1).from;
+      const contentTo = doc.line(close - 1).to;
+      const code = doc.sliceString(contentFrom, contentTo);
+      for (const token of highlightRanges(code, lang)) {
+        collected.push(Decoration.mark({ class: token.className }).range(contentFrom + token.from, contentFrom + token.to));
+      }
+    }
+
+    i = close + 1;
+  }
+
+  collected.sort((a, b) => a.from - b.from || a.to - b.to);
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const decoration of collected) builder.add(decoration.from, decoration.to, decoration.value);
+  return builder.finish();
+}
+
+const codeField = StateField.define<DecorationSet>({
+  create: buildCodeDecorations,
+  update(value, transaction) {
+    if (transaction.docChanged || transaction.selection) return buildCodeDecorations(transaction.state);
+    return value;
+  },
+  provide: (field) => EditorView.decorations.from(field)
+});
 
 // ---------- ตาราง (block-level) ----------
 // CodeMirror ไม่อนุญาตให้ ViewPlugin สร้าง decoration คร่อมหลายบรรทัด (block widget)
@@ -616,6 +739,7 @@ export function liveMarkdown(documentPath: string | null = null): Extension {
     documentPathFacet.of(documentPath),
     liveMarkdownPlugin,
     tableField,
+    codeField,
     EditorView.baseTheme({
       '.cm-lm-heading': { fontWeight: '700' },
       '.cm-lm-heading-1': { fontSize: '1.7em' },
@@ -637,6 +761,29 @@ export function liveMarkdown(documentPath: string | null = null): Extension {
         background: 'var(--bg-soft)',
         padding: '0.1em 0.3em',
         borderRadius: '4px'
+      },
+      // โค้ดบล็อก (```lang ... ```) — เส้นขอบ+พื้นหลังต่อเนื่องกันทุกบรรทัดในบล็อกให้ดูเป็นกล่องเดียว
+      '.cm-lm-code-fence, .cm-lm-code-line': {
+        fontFamily: 'var(--mono)',
+        fontSize: '0.92em',
+        background: 'var(--code-bg)'
+      },
+      '.cm-lm-code-fence-open': {
+        position: 'relative',
+        paddingTop: '0.5em',
+        borderTopLeftRadius: '8px',
+        borderTopRightRadius: '8px'
+      },
+      '.cm-lm-code-fence-close': {
+        paddingBottom: '0.5em',
+        borderBottomLeftRadius: '8px',
+        borderBottomRightRadius: '8px'
+      },
+      '.cm-lm-code-lang': {
+        color: 'var(--text-soft)',
+        fontSize: '0.85em',
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em'
       },
       '.cm-lm-link': {
         color: 'var(--accent)',

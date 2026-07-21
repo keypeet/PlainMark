@@ -3,6 +3,8 @@
 import { History } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { pad2 } from '../lib/dateFormat';
+import { lineDiffStats } from '../lib/diffStats';
+import type { DiffStats } from '../lib/diffStats';
 import { listSnapshots, readSnapshot, saveSnapshot, writeNoteQueued } from '../lib/noteService';
 import type { SnapshotMeta } from '../lib/noteService';
 import { useDocStore } from '../store/docStore';
@@ -23,6 +25,8 @@ export function NoteHistory() {
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
   // เวอร์ชันที่กำลังเปิดดูเนื้อหา (คลิกเวลาเพื่อดูก่อนตัดสินใจกู้คืน)
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
+  // ขนาดการแก้ไขของแต่ละเวอร์ชัน เทียบกับเวอร์ชันก่อนหน้า (เก่ากว่า) — คีย์ด้วย path ของ snapshot นั้น
+  const [diffStats, setDiffStats] = useState<Map<string, DiffStats>>(new Map());
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   const refreshList = useCallback(() => {
@@ -31,6 +35,27 @@ export function NoteHistory() {
       .then(setSnapshots)
       .catch(() => setSnapshots([]));
   }, [notePath]);
+
+  // เปิดแผงแล้วค่อยอ่านเนื้อหาทุกเวอร์ชันมาหาขนาดการแก้ไข (ตัวสุดท้าย/เก่าสุด เทียบกับค่าว่าง = สร้างครั้งแรก)
+  useEffect(() => {
+    if (!open || snapshots.length === 0) {
+      setDiffStats(new Map());
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(snapshots.map((snapshot) => readSnapshot(snapshot.path).catch(() => ''))).then((contents) => {
+      if (cancelled) return;
+      const next = new Map<string, DiffStats>();
+      snapshots.forEach((snapshot, index) => {
+        const older = contents[index + 1] ?? '';
+        next.set(snapshot.path, lineDiffStats(older, contents[index]));
+      });
+      setDiffStats(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, snapshots]);
 
   // โหลดรายการตั้งแต่เปลี่ยนโน้ต — ให้ tooltip บอกจำนวนเวอร์ชันได้โดยไม่ต้องเปิดแผงก่อน
   useEffect(() => {
@@ -138,23 +163,36 @@ export function NoteHistory() {
           {snapshots.length === 0 && (
             <div className="history-empty">ยังไม่มีเวอร์ชันเก่า — จะเริ่มเก็บเมื่อโน้ตถูกแก้ไขต่อเนื่อง</div>
           )}
-          {snapshots.map((snapshot) => (
-            <div key={snapshot.path}>
-              <div className="history-row">
-                <button
-                  className={`history-time ${preview?.path === snapshot.path ? 'active' : ''}`}
-                  title="คลิกเพื่อดูเนื้อหาเวอร์ชันนี้"
-                  onClick={() => void togglePreview(snapshot)}
-                >
-                  {snapshotLabel(snapshot.savedAt)}
-                </button>
-                <button className="history-restore" onClick={() => void restore(snapshot)}>
-                  กู้คืน
-                </button>
+          {snapshots.map((snapshot) => {
+            const diff = diffStats.get(snapshot.path);
+            return (
+              <div key={snapshot.path}>
+                <div className="history-row">
+                  <button
+                    className={`history-time ${preview?.path === snapshot.path ? 'active' : ''}`}
+                    title="คลิกเพื่อดูเนื้อหาเวอร์ชันนี้"
+                    onClick={() => void togglePreview(snapshot)}
+                  >
+                    {snapshotLabel(snapshot.savedAt)}
+                  </button>
+                  {diff && (
+                    <span
+                      className="history-diff"
+                      title={`เทียบกับเวอร์ชันก่อนหน้า: เพิ่ม ${diff.added} บรรทัด, ลบ ${diff.removed} บรรทัด`}
+                    >
+                      {diff.added > 0 && <em className="diff-added">+{diff.added}</em>}
+                      {diff.removed > 0 && <em className="diff-removed">-{diff.removed}</em>}
+                      {diff.added === 0 && diff.removed === 0 && <em className="diff-none">±0</em>}
+                    </span>
+                  )}
+                  <button className="history-restore" onClick={() => void restore(snapshot)}>
+                    กู้คืน
+                  </button>
+                </div>
+                {preview?.path === snapshot.path && <pre className="history-preview">{preview.content}</pre>}
               </div>
-              {preview?.path === snapshot.path && <pre className="history-preview">{preview.content}</pre>}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
