@@ -1,19 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const apiTarget = process.env.PLAINMARK_API_URL || 'http://127.0.0.1:4985';
+
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
     host: '127.0.0.1',
     port: 1420,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: apiTarget,
+        changeOrigin: false
+      }
+    }
   },
-  envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    target: process.env.TAURI_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
-    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
-    sourcemap: Boolean(process.env.TAURI_DEBUG)
+    target: 'chrome114',
+    minify: 'esbuild',
+    sourcemap: false
   },
   test: {
     environment: 'jsdom'

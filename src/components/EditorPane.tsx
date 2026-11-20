@@ -3,16 +3,18 @@ import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from
 import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { NoteHistory } from './NoteHistory';
 import { useDocStore } from '../store/docStore';
 import { useSettingsStore } from '../store/settingsStore';
-import type { EditorApi } from '../types';
+import type { EditorApi, SearchStats, ViewMode } from '../types';
 import { collapseDataUrls } from './editor/collapseDataUrls';
-import { floatingToolbar } from './editor/floatingToolbar';
-import { hoverPreview } from './editor/hoverPreview';
 import { focusFirstTableCellAt, liveMarkdown } from './editor/liveMarkdown';
 import { attachPasteDrop } from './editor/pasteDrop';
-import { slashMenu } from './editor/slashMenu';
+import {
+  findMatches,
+  searchConfigField,
+  searchHighlightExtension,
+  setSearchConfigEffect
+} from './editor/searchExtension';
 import { smartFormatExtension } from './editor/smartFormatExtension';
 
 function getCursorPosition(content: string, offset: number) {
@@ -21,15 +23,13 @@ function getCursorPosition(content: string, offset: number) {
   return { line: lines.length, column: lines[lines.length - 1].length + 1 };
 }
 
-// CodeMirror เลือก tooltip theme (พื้นขาว/พื้นดำ) จาก dark flag ตอนสร้าง theme() เอง
-// ไม่ได้อ่านจาก CSS variable — ต้องบอกมันตรงๆ ว่าตอนนี้ธีมแอปเป็นมืดหรือไม่
 function resolveIsDark(theme: string): boolean {
   if (theme === 'dark') return true;
   if (theme === 'light') return false;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function editorTheme(dark: boolean) {
+function editorTheme(dark: boolean, viewMode: ViewMode) {
   return EditorView.theme(
     {
       '&': {
@@ -37,17 +37,21 @@ function editorTheme(dark: boolean) {
         backgroundColor: 'var(--editor-bg)',
         color: 'var(--text)'
       },
+      '.cm-scroller': {
+        fontFamily: viewMode === 'formatted' ? 'var(--sans)' : 'var(--mono)'
+      },
       '.cm-content': {
-        fontFamily: 'var(--mono)',
-        fontSize: '13.5px',
-        lineHeight: '1.7',
-        padding: '14px 16px',
+        fontFamily: viewMode === 'formatted' ? 'var(--sans)' : 'var(--mono)',
+        fontSize: 'calc(14.5px * var(--editor-zoom, 1))',
+        lineHeight: viewMode === 'formatted' ? '1.78' : '1.68',
+        padding: viewMode === 'formatted' ? '22px max(28px, calc((100% - 860px) / 2)) 72px' : '14px 18px 64px',
         caretColor: 'var(--text)'
       },
       '.cm-gutters': {
         backgroundColor: 'var(--bg-soft)',
         color: 'var(--text-soft)',
-        borderRight: '1px solid var(--border)'
+        borderRight: '1px solid var(--border)',
+        fontSize: 'calc(12.5px * var(--editor-zoom, 1))'
       },
       '.cm-activeLineGutter, .cm-activeLine': {
         backgroundColor: 'var(--active-line)'
@@ -71,25 +75,46 @@ function editorTheme(dark: boolean) {
 }
 
 interface EditorPaneProps {
+  tabId: string;
   documentPath: string | null;
-  fullMode?: boolean;
+  viewMode: ViewMode;
 }
 
-// ตำแหน่ง scroll ล่าสุดของแต่ละไฟล์ — สลับไฟล์ไปมาแล้วกลับมาอยู่จุดเดิม ไม่เด้งขึ้นบนสุด
-// เก็บในหน่วยความจำระดับ module (คงอยู่แม้ EditorPane ถูก unmount ตอนสลับ layout)
 const scrollPositions = new Map<string, number>();
 
-export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ documentPath, fullMode = false }, ref) => {
+export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ tabId, documentPath, viewMode }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartmentRef = useRef(new Compartment());
   const liveMarkdownCompartmentRef = useRef(new Compartment());
+  const lineNumbersCompartmentRef = useRef(new Compartment());
+  const wrapCompartmentRef = useRef(new Compartment());
   const historyCompartmentRef = useRef(new Compartment());
+  const lastTabIdRef = useRef<string>(tabId);
+
   const content = useDocStore((state) => state.content);
-  const fileName = useDocStore((state) => state.file.name);
   const setContent = useDocStore((state) => state.setContent);
   const setCursor = useDocStore((state) => state.setCursor);
   const appTheme = useSettingsStore((state) => state.theme);
+  const showLineNumbers = useSettingsStore((state) => state.showLineNumbers);
+  const wordWrap = useSettingsStore((state) => state.wordWrap);
+
+  const applySearchSelection = (view: EditorView, query: string, matchCase: boolean, targetIndex: number): SearchStats => {
+    const docText = view.state.doc.toString();
+    const matches = findMatches(docText, query, matchCase);
+    if (!matches.length) {
+      view.dispatch({ effects: setSearchConfigEffect.of({ query, matchCase, activeIndex: -1 }) });
+      return { total: 0, current: 0 };
+    }
+    const wrapped = ((targetIndex % matches.length) + matches.length) % matches.length;
+    const match = matches[wrapped];
+    view.dispatch({
+      effects: setSearchConfigEffect.of({ query, matchCase, activeIndex: wrapped }),
+      selection: { anchor: match.from, head: match.to },
+      scrollIntoView: true
+    });
+    return { total: matches.length, current: wrapped + 1 };
+  };
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -112,26 +137,95 @@ export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ documentPath
     focusTableCellAt: (pos) => {
       const view = viewRef.current;
       if (!view) return;
-      // รอ widget ตาราง render เสร็จหนึ่งเฟรมก่อน แล้วค่อยย้ายโฟกัสเข้าช่องแรก
       requestAnimationFrame(() => focusFirstTableCellAt(view, pos));
+    },
+    goToLine: (lineNumber) => {
+      const view = viewRef.current;
+      if (!view) return false;
+      const totalLines = view.state.doc.lines;
+      if (!Number.isFinite(lineNumber) || lineNumber < 1 || lineNumber > totalLines) return false;
+      const line = view.state.doc.line(Math.floor(lineNumber));
+      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.focus();
+      return true;
+    },
+    setSearch: (query, matchCase) => {
+      const view = viewRef.current;
+      if (!view) return { total: 0, current: 0 };
+      if (!query) {
+        view.dispatch({ effects: setSearchConfigEffect.of({ query: '', matchCase, activeIndex: -1 }) });
+        return { total: 0, current: 0 };
+      }
+      const docText = view.state.doc.toString();
+      const matches = findMatches(docText, query, matchCase);
+      if (!matches.length) {
+        view.dispatch({ effects: setSearchConfigEffect.of({ query, matchCase, activeIndex: -1 }) });
+        return { total: 0, current: 0 };
+      }
+      const cursor = view.state.selection.main.from;
+      const nextIdx = Math.max(0, matches.findIndex((m) => m.from >= cursor));
+      return applySearchSelection(view, query, matchCase, nextIdx);
+    },
+    findNext: () => {
+      const view = viewRef.current;
+      if (!view) return { total: 0, current: 0 };
+      const cfg = view.state.field(searchConfigField);
+      if (!cfg.query) return { total: 0, current: 0 };
+      return applySearchSelection(view, cfg.query, cfg.matchCase, cfg.activeIndex + 1);
+    },
+    findPrev: () => {
+      const view = viewRef.current;
+      if (!view) return { total: 0, current: 0 };
+      const cfg = view.state.field(searchConfigField);
+      if (!cfg.query) return { total: 0, current: 0 };
+      return applySearchSelection(view, cfg.query, cfg.matchCase, cfg.activeIndex - 1);
+    },
+    replaceCurrent: (replacement) => {
+      const view = viewRef.current;
+      if (!view) return { total: 0, current: 0 };
+      const cfg = view.state.field(searchConfigField);
+      if (!cfg.query) return { total: 0, current: 0 };
+      const matches = findMatches(view.state.doc.toString(), cfg.query, cfg.matchCase);
+      if (!matches.length) return { total: 0, current: 0 };
+      const idx = cfg.activeIndex >= 0 && cfg.activeIndex < matches.length ? cfg.activeIndex : 0;
+      const match = matches[idx];
+      view.dispatch({
+        changes: { from: match.from, to: match.to, insert: replacement },
+        selection: { anchor: match.from + replacement.length },
+        scrollIntoView: true
+      });
+      return applySearchSelection(view, cfg.query, cfg.matchCase, idx);
+    },
+    replaceAll: (replacement) => {
+      const view = viewRef.current;
+      if (!view) return 0;
+      const cfg = view.state.field(searchConfigField);
+      if (!cfg.query) return 0;
+      const matches = findMatches(view.state.doc.toString(), cfg.query, cfg.matchCase);
+      if (!matches.length) return 0;
+      view.dispatch({
+        changes: matches.map((m) => ({ from: m.from, to: m.to, insert: replacement })),
+        effects: setSearchConfigEffect.of({ query: cfg.query, matchCase: cfg.matchCase, activeIndex: -1 })
+      });
+      return matches.length;
     }
   }));
 
+  // Mount CodeMirror once — clean & fast without slashMenu, floatingToolbar, or hoverPreview
   useEffect(() => {
     if (!containerRef.current || viewRef.current) return;
+    const settings = useSettingsStore.getState();
 
     const extensions = [
-      lineNumbers(),
-      historyCompartmentRef.current.of(history()), // อยู่ใน compartment เพื่อล้างประวัติได้ตอนเปลี่ยนเอกสาร
+      lineNumbersCompartmentRef.current.of(settings.showLineNumbers || settings.viewMode === 'syntax' ? lineNumbers() : []),
+      historyCompartmentRef.current.of(history()),
       markdown(),
-      smartFormatExtension(), // ต้องมาก่อน defaultKeymap เพื่อดัก Enter/Space บนบรรทัด list
+      smartFormatExtension(),
       keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
-      EditorView.lineWrapping,
+      wrapCompartmentRef.current.of(settings.wordWrap ? EditorView.lineWrapping : []),
       collapseDataUrls,
-      slashMenu(),
-      floatingToolbar(),
-      hoverPreview(),
-      liveMarkdownCompartmentRef.current.of([]), // เติมค่าจริงใน effect ด้านล่างตาม fullMode/documentPath
+      searchHighlightExtension,
+      liveMarkdownCompartmentRef.current.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           setContent(update.state.doc.toString());
@@ -141,7 +235,7 @@ export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ documentPath
           setCursor(getCursorPosition(update.state.doc.toString(), cursor));
         }
       }),
-      themeCompartmentRef.current.of(editorTheme(resolveIsDark(useSettingsStore.getState().theme)))
+      themeCompartmentRef.current.of(editorTheme(resolveIsDark(settings.theme), settings.viewMode))
     ];
 
     const state = EditorState.create({ doc: content, extensions });
@@ -154,39 +248,45 @@ export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ documentPath
     };
   }, [setContent, setCursor]);
 
+  // Sync content when switching tabs or loading from disk
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const current = view.state.doc.toString();
-    if (current === content) return;
-    // เนื้อหาถูกตั้งจากภายนอก (เปิดโน้ต/ไฟล์, กู้ session, กู้คืนเวอร์ชัน) = เปลี่ยนเอกสาร
-    // ไม่เก็บลง undo และล้างประวัติเดิมทิ้ง — กัน Ctrl+Z แล้วเด้งกลับไปเป็นเอกสารก่อนหน้า
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: content },
-      annotations: Transaction.addToHistory.of(false)
-    });
-    view.dispatch({ effects: historyCompartmentRef.current.reconfigure([]) });
-    view.dispatch({ effects: historyCompartmentRef.current.reconfigure(history()) });
-  }, [content]);
+    const tabChanged = lastTabIdRef.current !== tabId;
+    lastTabIdRef.current = tabId;
+    if (current === content && !tabChanged) return;
+    if (current !== content) {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: content },
+        annotations: Transaction.addToHistory.of(false)
+      });
+    }
+    if (tabChanged || current !== content) {
+      view.dispatch({ effects: historyCompartmentRef.current.reconfigure([]) });
+      view.dispatch({ effects: historyCompartmentRef.current.reconfigure(history()) });
+    }
+  }, [content, tabId]);
 
-  // จำ/กู้ตำแหน่ง scroll ต่อไฟล์ — ต้องอยู่หลัง effect เนื้อหาด้านบน ให้กู้หลังเอกสารถูกแทนที่แล้ว
+  // Remember scroll per tab/file
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || !documentPath) return;
-    const saved = scrollPositions.get(documentPath);
+    if (!view) return;
+    const key = documentPath ?? tabId;
+    const saved = scrollPositions.get(key);
     if (saved !== undefined) {
-      // รอ CodeMirror วัด layout เอกสารใหม่ก่อนหนึ่งเฟรม ไม่งั้น scrollTop โดน clamp เป็น 0
       requestAnimationFrame(() => {
         if (viewRef.current === view) view.scrollDOM.scrollTop = saved;
       });
+    } else {
+      view.scrollDOM.scrollTop = 0;
     }
-    const remember = () => scrollPositions.set(documentPath, view.scrollDOM.scrollTop);
+    const remember = () => scrollPositions.set(key, view.scrollDOM.scrollTop);
     view.scrollDOM.addEventListener('scroll', remember);
     return () => view.scrollDOM.removeEventListener('scroll', remember);
-  }, [documentPath]);
+  }, [documentPath, tabId]);
 
-  // Ctrl+Z / Ctrl+Y ใช้ได้แม้ focus ไม่อยู่ใน editor (เช่น หลังคลิกปุ่ม toolbar/แถบข้าง)
-  // ตอน editor โฟกัสอยู่ CodeMirror จัดการเองและ preventDefault มาก่อนแล้ว — ตัวนี้เป็น fallback เท่านั้น
+  // Global Ctrl+Z / Ctrl+Y fallback when focus leaves editor
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const view = viewRef.current;
@@ -208,44 +308,52 @@ export const EditorPane = forwardRef<EditorApi, EditorPaneProps>(({ documentPath
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Theme & viewMode typography sync
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const applyDark = (dark: boolean) =>
-      view.dispatch({ effects: themeCompartmentRef.current.reconfigure(editorTheme(dark)) });
-
-    applyDark(resolveIsDark(appTheme));
+    const apply = (dark: boolean) =>
+      view.dispatch({ effects: themeCompartmentRef.current.reconfigure(editorTheme(dark, viewMode)) });
+    apply(resolveIsDark(appTheme));
     if (appTheme !== 'system') return;
-
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (event: MediaQueryListEvent) => applyDark(event.matches);
+    const onChange = (event: MediaQueryListEvent) => apply(event.matches);
     media.addEventListener('change', onChange);
     return () => media.removeEventListener('change', onChange);
-  }, [appTheme]);
+  }, [appTheme, viewMode]);
 
+  // Line numbers & word wrap compartments
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: [
+        lineNumbersCompartmentRef.current.reconfigure(showLineNumbers || viewMode === 'syntax' ? lineNumbers() : []),
+        wrapCompartmentRef.current.reconfigure(wordWrap ? EditorView.lineWrapping : [])
+      ]
+    });
+  }, [showLineNumbers, wordWrap, viewMode]);
+
+  // Paste/drop image upload to local backend
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
     return attachPasteDrop(root, () => viewRef.current, () => documentPath);
   }, [documentPath]);
 
-  // สลับ live markdown ตามโหมด — documentPath ใช้ resolve รูป relative (note.assets/…) ให้แสดงเหมือน Preview
+  // Toggle liveMarkdown cleanly between Formatted <-> Syntax
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      effects: liveMarkdownCompartmentRef.current.reconfigure(fullMode ? liveMarkdown(documentPath) : [])
+      effects: liveMarkdownCompartmentRef.current.reconfigure(
+        viewMode === 'formatted' ? liveMarkdown(documentPath) : []
+      )
     });
-  }, [documentPath, fullMode]);
+  }, [documentPath, viewMode]);
 
   return (
-    <section className={`pane editor-pane${fullMode ? ' full-mode' : ''}`}>
-      <div className="pane-header">
-        <span className="dot" />
-        {fullMode ? 'Full' : 'Editor'} - {fileName}
-        <span className="pane-header-spacer" />
-        <NoteHistory />
-      </div>
+    <section className={`pane editor-pane${viewMode === 'formatted' ? ' full-mode' : ''}`}>
       <div ref={containerRef} className="editor-host" />
     </section>
   );

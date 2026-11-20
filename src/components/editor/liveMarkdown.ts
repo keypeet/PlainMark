@@ -5,23 +5,20 @@ import { Facet, RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import hljs from 'highlight.js';
 import { renderMarkdown } from '../../lib/markdownEngine';
-import { hasTauri, tauriCore, tauriPath } from '../../lib/platform';
+import { assetImageUrl } from '../../lib/api';
 import { fixTableBlock, isSeparatorRow, parseCells, tableRowOf } from '../../lib/tableFormat';
 
-// path ของเอกสารปัจจุบัน — ใช้ resolve รูป relative (เช่น note.assets/…) แบบเดียวกับ useRenderedMarkdown
+// path ของเอกสารปัจจุบัน — ใช้ resolve รูป relative (เช่น note.assets/…) ผ่าน local backend API
 const documentPathFacet = Facet.define<string | null, string | null>({
   combine: (values) => (values.length ? values[0] : null)
 });
 
-/** ตั้ง src ให้ <img> — path relative ต้องแปลงผ่าน convertFileSrc ของ Tauri ไม่งั้นรูปที่วางไว้ข้างไฟล์จะไม่ขึ้น */
 function assignImageSrc(img: HTMLImageElement, src: string, documentPath: string | null) {
-  if (!hasTauri || !documentPath || /^(?:[a-z][a-z+.-]*:|\/)/i.test(src)) {
+  if (!documentPath || /^(?:[a-z][a-z+.-]*:|\/)/i.test(src)) {
     img.src = src;
     return;
   }
-  void Promise.all([tauriPath(), tauriCore()]).then(async ([{ dirname, join }, { convertFileSrc }]) => {
-    img.src = convertFileSrc(await join(await dirname(documentPath), decodeURIComponent(src)));
-  });
+  img.src = assetImageUrl(documentPath, src);
 }
 
 const headingLine = /^(#{1,6})\s+/;

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearFormatting,
   createImage,
   createLink,
   createTable,
   insertReferenceLink,
   prefixLines,
   prefixOrderedList,
+  setHeadingLevel,
   toggleHeading,
   wrapSelection
 } from './formatActions';
@@ -150,5 +152,20 @@ describe('formatActions', () => {
     );
     expect(second.content).toContain('[ref1]: https://one.example');
     expect(second.content).toContain('[ref2]: https://two.example');
+  });
+
+  it('setHeadingLevel sets H1..H6 or clears back to Body (0)', () => {
+    const h2 = setHeadingLevel('hello', { from: 2, to: 2 }, 2);
+    expect(h2.content).toBe('## hello');
+    const h3 = setHeadingLevel(h2.content, { from: 4, to: 4 }, 3);
+    expect(h3.content).toBe('### hello');
+    const body = setHeadingLevel(h3.content, { from: 5, to: 5 }, 0);
+    expect(body.content).toBe('hello');
+  });
+
+  it('clearFormatting removes block and inline markdown markers', () => {
+    const input = '## **Bold** and *italic* and `code` [link](https://a.test)';
+    const res = clearFormatting(input, { from: 0, to: input.length });
+    expect(res.content).toBe('Bold and italic and code link');
   });
 });

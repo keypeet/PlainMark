@@ -4,43 +4,67 @@ interface AppShortcutHandlers {
   onNew: () => void;
   onOpen: () => void;
   onSave: () => void;
+  onSaveAll: () => void;
+  onCloseTab: () => void;
+  onFind: (withReplace: boolean) => void;
+  onGoToLine: () => void;
+  onGlobalSearch: () => void;
+  onToggleViewMode: () => void;
   changeZoom: (delta: number | null) => void;
 }
 
-// คีย์ลัดระดับแอป: Ctrl+N / Ctrl+O / Ctrl+S และซูม Ctrl+= / Ctrl+- / Ctrl+0
-// (คีย์ลัดจัดรูปแบบข้อความอยู่ที่ Toolbar)
-export function useAppShortcuts({ onNew, onOpen, onSave, changeZoom }: AppShortcutHandlers) {
+export function useAppShortcuts(handlers: AppShortcutHandlers) {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
       const key = event.key.toLowerCase();
-      if (key === 's') {
+
+      if (key === 's' && event.shiftKey) {
         event.preventDefault();
-        onSave();
-      }
-      if (key === 'o') {
+        handlers.onSaveAll();
+      } else if (key === 's') {
         event.preventDefault();
-        onOpen();
-      }
-      if (key === 'n') {
+        handlers.onSave();
+      } else if (key === 'o') {
         event.preventDefault();
-        onNew();
-      }
-      if (key === '=' || key === '+') {
+        handlers.onOpen();
+      } else if (key === 'n') {
         event.preventDefault();
-        changeZoom(0.1);
-      }
-      if (key === '-') {
+        handlers.onNew();
+      } else if (key === 'w') {
         event.preventDefault();
-        changeZoom(-0.1);
-      }
-      if (key === '0') {
+        handlers.onCloseTab();
+      } else if (key === 'f' && !event.shiftKey) {
         event.preventDefault();
-        changeZoom(null);
+        handlers.onFind(false);
+      } else if (key === 'h' && !event.shiftKey) {
+        event.preventDefault();
+        handlers.onFind(true);
+      } else if (key === 'g' && !event.shiftKey) {
+        event.preventDefault();
+        handlers.onGoToLine();
+      } else if (key === 'k' && event.shiftKey) {
+        event.preventDefault();
+        handlers.onGlobalSearch();
+      } else if (key === 'p' && !event.shiftKey) {
+        event.preventDefault();
+        handlers.onGlobalSearch();
+      } else if (key === 'm' && event.shiftKey) {
+        event.preventDefault();
+        handlers.onToggleViewMode();
+      } else if (key === '=' || key === '+') {
+        event.preventDefault();
+        handlers.changeZoom(0.1);
+      } else if (key === '-') {
+        event.preventDefault();
+        handlers.changeZoom(-0.1);
+      } else if (key === '0') {
+        event.preventDefault();
+        handlers.changeZoom(null);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [changeZoom, onNew, onOpen, onSave]);
+  }, [handlers]);
 }

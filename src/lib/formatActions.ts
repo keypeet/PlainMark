@@ -195,6 +195,56 @@ export function toggleHeading(content: string, selection: SelectionRange, level 
   };
 }
 
+// ตั้งระดับหัวข้อโดยตรง (0 = เนื้อความปกติ, 1–6 = H1–H6) แบบเมนู Heading ของ Windows Notepad
+export function setHeadingLevel(content: string, selection: SelectionRange, level: number): FormatResult {
+  const lineStart = content.lastIndexOf('\n', Math.max(selection.from - 1, 0)) + 1;
+  const lineEndIndex = content.indexOf('\n', selection.from);
+  const lineEnd = lineEndIndex === -1 ? content.length : lineEndIndex;
+  const line = content.slice(lineStart, lineEnd);
+  const cleanLine = line.replace(/^#{1,6}\s+/, '');
+  const clamped = Math.max(0, Math.min(6, Math.floor(level)));
+  const prefix = clamped > 0 ? '#'.repeat(clamped) + ' ' : '';
+  const nextLine = `${prefix}${cleanLine}`;
+  const nextContent = content.slice(0, lineStart) + nextLine + content.slice(lineEnd);
+  const offset = nextLine.length - line.length;
+
+  return {
+    content: nextContent,
+    selectionStart: Math.max(lineStart + prefix.length, selection.from + offset),
+    selectionEnd: Math.max(lineStart + prefix.length, selection.to + offset)
+  };
+}
+
+// ล้างรูปแบบ Markdown ออกจากช่วงที่เลือก (หรือทั้งบรรทัดปัจจุบันถ้าไม่ได้คลุม) — แบบ Ctrl+Space ของ Notepad
+export function clearFormatting(content: string, selection: SelectionRange): FormatResult {
+  const hasSelection = selection.from !== selection.to;
+  const from = hasSelection ? selection.from : content.lastIndexOf('\n', Math.max(selection.from - 1, 0)) + 1;
+  const lineEndIdx = content.indexOf('\n', selection.from);
+  const to = hasSelection ? selection.to : lineEndIdx === -1 ? content.length : lineEndIdx;
+  const target = content.slice(from, to);
+
+  const cleaned = target
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s*(?:(?:#{1,6}|>|\d+\.|[-*+](?:\s+\[[ xX]\])?)\s+)+/, '')
+        .replace(/(\*\*\*|___)(.+?)\1/g, '$2')
+        .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
+        .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1')
+        .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '$1')
+        .replace(/`([^`\n]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)\s]+(?:\s+"[^"]*")?\)/g, '$1')
+    )
+    .join('\n');
+
+  const nextContent = content.slice(0, from) + cleaned + content.slice(to);
+  return {
+    content: nextContent,
+    selectionStart: from,
+    selectionEnd: hasSelection ? from + cleaned.length : from + cleaned.length
+  };
+}
+
 export function createTable(content: string, selection: SelectionRange, rows = 2, cols = 2): FormatResult {
   const safeRows = Math.max(1, Math.min(20, Math.floor(rows)));
   const safeCols = Math.max(1, Math.min(10, Math.floor(cols)));

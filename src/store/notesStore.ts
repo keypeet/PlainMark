@@ -1,80 +1,114 @@
 import { create } from 'zustand';
-import type { GroupMeta } from '../lib/noteService';
+import { apiHealth, apiImportLegacy } from '../lib/api';
+import type { NoteMeta, ProjectMeta } from '../lib/noteService';
 import {
-  createGroup,
   createNote,
-  deleteGroup,
+  createProject,
   deleteNote,
+  deleteProject,
   enqueueNoteOp,
-  loadTree,
+  loadProjects,
   moveNote,
-  notesSupported,
-  renameGroup,
-  renameNote
+  renameNote,
+  updateProject
 } from '../lib/noteService';
-import type { NoteMeta } from '../lib/noteService';
-import { baseName } from '../lib/paths';
 
 interface NotesState {
-  groups: GroupMeta[];
+  projects: ProjectMeta[];
+  dataRoot: string;
   loaded: boolean;
-  // กลุ่มที่ผู้ใช้เลือกล่าสุด (คลิกหัวกลุ่ม หรือเปิดโน้ตในกลุ่มนั้น) — เป็นปลายทางของปุ่ม New
-  selectedGroup: string | null;
-  selectGroup: (name: string | null) => void;
+  backendOnline: boolean;
+  legacyAvailable: boolean;
+  legacyPath: string;
+  selectedProjectSlug: string | null;
+
+  selectProject: (slug: string | null) => void;
   refresh: () => Promise<void>;
-  addGroup: (name: string) => Promise<void>;
-  addNote: (groupName?: string, title?: string) => Promise<NoteMeta | null>;
+  addProject: (name: string, repoPath?: string | null) => Promise<ProjectMeta | null>;
+  editProject: (
+    slug: string,
+    patch: { name?: string; repoPath?: string | null; glossary?: string[] }
+  ) => Promise<ProjectMeta | null>;
+  removeProject: (slug: string) => Promise<void>;
+  addNote: (projectSlug?: string, title?: string) => Promise<NoteMeta | null>;
   renameNoteAt: (notePath: string, newTitle: string) => Promise<NoteMeta | null>;
-  renameGroupAt: (groupPath: string, newName: string) => Promise<void>;
-  moveNoteTo: (notePath: string, targetGroupName: string) => Promise<NoteMeta | null>;
+  moveNoteTo: (notePath: string, targetProjectSlug: string) => Promise<NoteMeta | null>;
   removeNote: (notePath: string) => Promise<void>;
-  removeGroup: (groupPath: string) => Promise<void>;
+  importLegacy: () => Promise<{ importedProjects: number; importedNotes: number } | null>;
 }
 
 export const useNotesStore = create<NotesState>((set, get) => {
-  // งานจริงของ refresh — ไม่เข้าคิวเอง เพื่อให้ action อื่นเรียกได้ภายใน enqueueNoteOp เดียวกัน (กัน deadlock re-entrant)
   const refreshInternal = async () => {
-    if (!notesSupported) {
-      set({ groups: [], loaded: true });
-      return;
-    }
     try {
-      const groups = await loadTree();
-      // กลุ่มที่เลือกไว้ถูกลบ/เปลี่ยนชื่อไปแล้ว → ล้างการเลือก (ปุ่ม New จะ fallback ตามลำดับปกติ)
+      const [{ dataRoot, projects }, health] = await Promise.all([
+        loadProjects(),
+        apiHealth().catch(() => null)
+      ]);
       set((state) => ({
-        groups,
+        projects,
+        dataRoot,
         loaded: true,
-        selectedGroup:
-          state.selectedGroup && groups.some((group) => group.name === state.selectedGroup)
-            ? state.selectedGroup
-            : null
+        backendOnline: true,
+        legacyAvailable: health?.legacyNotesAvailable ?? state.legacyAvailable,
+        legacyPath: health?.legacyNotesPath ?? state.legacyPath,
+        selectedProjectSlug:
+          state.selectedProjectSlug && projects.some((p) => p.slug === state.selectedProjectSlug)
+            ? state.selectedProjectSlug
+            : projects[0]?.slug ?? null
       }));
     } catch (error) {
-      console.error('PlainMark: load notes tree failed', error);
-      set({ loaded: true });
+      console.error('PlainMark: load projects failed', error);
+      set({ loaded: true, backendOnline: false });
     }
   };
 
-  // ทุก action วิ่งผ่านคิวกลางเดียวกัน → ทำทีละงาน ไม่สลับจังหวะชนกันตอน I/O ช้า (OneDrive)
   return {
-    groups: [],
+    projects: [],
+    dataRoot: '',
     loaded: false,
-    selectedGroup: null,
+    backendOnline: true,
+    legacyAvailable: false,
+    legacyPath: '',
+    selectedProjectSlug: null,
 
-    selectGroup: (name) => set({ selectedGroup: name }),
+    selectProject: (slug) => set({ selectedProjectSlug: slug }),
 
     refresh: () => enqueueNoteOp(refreshInternal),
 
-    addGroup: (name) =>
+    addProject: (name, repoPath) =>
       enqueueNoteOp(async () => {
-        await createGroup(name);
+        try {
+          const created = await createProject(name, repoPath);
+          await refreshInternal();
+          set({ selectedProjectSlug: created.slug });
+          return created;
+        } catch (error) {
+          console.error('PlainMark: create project failed', error);
+          return null;
+        }
+      }),
+
+    editProject: (slug, patch) =>
+      enqueueNoteOp(async () => {
+        const updated = await updateProject(slug, patch);
+        if (get().selectedProjectSlug === slug) {
+          set({ selectedProjectSlug: updated.slug });
+        }
+        await refreshInternal();
+        return updated;
+      }),
+
+    removeProject: (slug) =>
+      enqueueNoteOp(async () => {
+        await deleteProject(slug);
         await refreshInternal();
       }),
 
-    addNote: (groupName, title) =>
+    addNote: (projectSlug, title) =>
       enqueueNoteOp(async () => {
         try {
-          const note = await createNote(groupName, title);
+          const target = projectSlug ?? get().selectedProjectSlug ?? undefined;
+          const note = await createNote(target, title);
           await refreshInternal();
           return note;
         } catch (error) {
@@ -95,21 +129,10 @@ export const useNotesStore = create<NotesState>((set, get) => {
         }
       }),
 
-    renameGroupAt: (groupPath, newName) =>
-      enqueueNoteOp(async () => {
-        const oldName = baseName(groupPath);
-        const newPath = await renameGroup(groupPath, newName);
-        // ถ้ากลุ่มที่เลือกอยู่คือกลุ่มที่ถูกเปลี่ยนชื่อ ให้การเลือกตามไปชื่อใหม่
-        if (get().selectedGroup === oldName) {
-          set({ selectedGroup: baseName(newPath) || null });
-        }
-        await refreshInternal();
-      }),
-
-    moveNoteTo: (notePath, targetGroupName) =>
+    moveNoteTo: (notePath, targetProjectSlug) =>
       enqueueNoteOp(async () => {
         try {
-          const note = await moveNote(notePath, targetGroupName);
+          const note = await moveNote(notePath, targetProjectSlug);
           await refreshInternal();
           return note;
         } catch (error) {
@@ -124,10 +147,16 @@ export const useNotesStore = create<NotesState>((set, get) => {
         await refreshInternal();
       }),
 
-    removeGroup: (groupPath) =>
+    importLegacy: () =>
       enqueueNoteOp(async () => {
-        await deleteGroup(groupPath);
-        await refreshInternal();
+        try {
+          const result = await apiImportLegacy();
+          await refreshInternal();
+          return { importedProjects: result.importedProjects, importedNotes: result.importedNotes };
+        } catch (error) {
+          console.error('PlainMark: legacy import failed', error);
+          return null;
+        }
       })
   };
 });

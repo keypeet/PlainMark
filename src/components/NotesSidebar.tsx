@@ -1,59 +1,92 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderCog, FolderPlus, Plus, RotateCcw } from 'lucide-react';
-import { noteGroupName, notesSupported } from '../lib/noteService';
+import { FolderArchive, FolderOpen, FolderPlus, Plus, Search } from 'lucide-react';
 import type { NoteMeta } from '../lib/noteService';
 import { useDocStore } from '../store/docStore';
 import { useNotesStore } from '../store/notesStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { NotesGroup } from './notes/NotesGroup';
-import { useNotesRoot } from './notes/useNotesRoot';
 
 interface NotesSidebarProps {
   onOpenNote: (note: NoteMeta) => void;
-  onCreateNote: (groupName?: string) => void;
+  onCreateNote: (projectSlug?: string) => void;
+  onNotice: (message: string) => void;
   width: number;
   onResize: (width: number) => void;
 }
 
-export function NotesSidebar({ onOpenNote, onCreateNote, width, onResize }: NotesSidebarProps) {
-  const { groups, loaded, selectedGroup, refresh, addGroup } = useNotesStore();
+export function NotesSidebar({ onOpenNote, onCreateNote, onNotice, width, onResize }: NotesSidebarProps) {
+  const {
+    projects,
+    dataRoot,
+    loaded,
+    backendOnline,
+    legacyAvailable,
+    legacyPath,
+    selectedProjectSlug,
+    refresh,
+    addProject,
+    importLegacy
+  } = useNotesStore();
   const hiddenPaths = useSettingsStore((state) => state.hiddenPaths);
-  const activeNotePath = useDocStore((state) => state.notePath);
-  const { rootDir, hasCustomRoot, applyNotesRoot, changeRootViaDialog } = useNotesRoot();
+  const activeProjectSlug = useDocStore((state) => state.projectSlug);
+  const [filterText, setFilterText] = useState('');
+  const [importing, setImporting] = useState(false);
 
-  // ตัดกลุ่ม/โน้ตที่ผู้ใช้ซ่อนออกจากรายการ — ไฟล์จริงยังอยู่ ยกเลิกซ่อนได้จากแผงรายการที่ซ่อน
-  const visibleGroups = useMemo(() => {
-    if (hiddenPaths.length === 0) return groups;
-    const hidden = new Set(hiddenPaths);
-    return groups
-      .filter((group) => !hidden.has(group.path))
-      .map((group) => ({ ...group, notes: group.notes.filter((note) => !hidden.has(note.path)) }));
-  }, [groups, hiddenPaths]);
-  // สถานะลากวางข้ามกลุ่ม — ต้องอยู่ระดับ sidebar เพราะกลุ่มต้นทาง/ปลายทางเป็นคนละ component
-  const [dragNote, setDragNote] = useState<{ note: NoteMeta; fromGroup: string } | null>(null);
-  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [dragNote, setDragNote] = useState<{ note: NoteMeta; fromSlug: string } | null>(null);
+  const [dragOverSlug, setDragOverSlug] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  if (!notesSupported) {
-    return (
-      <aside className="notes-sidebar">
-        <div className="notes-head">โน้ตของฉัน</div>
-        <p className="notes-empty">ระบบกลุ่มโน้ตใช้ได้เฉพาะแอปเดสก์ท็อป</p>
-      </aside>
-    );
-  }
+  const visibleProjects = useMemo(() => {
+    const hidden = new Set(hiddenPaths);
+    const needle = filterText.trim().toLowerCase();
+    return projects
+      .filter((project) => !hidden.has(project.path))
+      .map((project) => {
+        const notes = project.notes.filter((note) => {
+          if (hidden.has(note.path)) return false;
+          if (!needle) return true;
+          return (
+            note.name.toLowerCase().includes(needle) ||
+            project.name.toLowerCase().includes(needle)
+          );
+        });
+        return { ...project, notes };
+      })
+      .filter((project) => !needle || project.notes.length > 0 || project.name.toLowerCase().includes(needle));
+  }, [projects, hiddenPaths, filterText]);
 
-  const handleAddGroup = () => {
-    const name = window.prompt('ตั้งชื่อกลุ่มใหม่:');
-    if (name?.trim()) void addGroup(name);
+  const handleAddProject = () => {
+    const name = window.prompt('ตั้งชื่อโปรเจคใหม่ (เช่น Self_development, งานประจำ):');
+    if (!name?.trim()) return;
+    const repoPath = window.prompt('ผูกกับโฟลเดอร์โค้ด/งานเดิม (ไม่บังคับ — เว้นว่างได้):', '');
+    void addProject(name.trim(), repoPath?.trim() || null).then((created) => {
+      if (created) onNotice(`สร้างโปรเจค "${created.name}" แล้ว`);
+    });
+  };
+
+  const handleImportLegacy = async () => {
+    if (importing) return;
+    const ok = window.confirm(
+      `คัดลอกโน้ตเดิมจาก:\n${legacyPath}\nมาเป็นโปรเจคใน PlainMark v2?\n(ไฟล์ต้นฉบับเดิมจะไม่ถูกลบหรือแก้ไข)`
+    );
+    if (!ok) return;
+    setImporting(true);
+    try {
+      const res = await importLegacy();
+      if (res) {
+        onNotice(`นำเข้าแล้ว ${res.importedNotes} โน้ต (${res.importedProjects} โปรเจคใหม่)`);
+      }
+    } finally {
+      setImporting(false);
+    }
   };
 
   const endDrag = () => {
     setDragNote(null);
-    setDragOverGroup(null);
+    setDragOverSlug(null);
   };
 
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -71,69 +104,85 @@ export function NotesSidebar({ onOpenNote, onCreateNote, width, onResize }: Note
   return (
     <aside className="notes-sidebar">
       <div className="notes-head">
-        <span>โน้ตของฉัน</span>
+        <span>โปรเจค</span>
         <div className="notes-head-actions">
           <button
+            type="button"
             className="notes-action"
-            title="โน้ตใหม่ (ในกลุ่มที่เลือกอยู่ — ไม่มี → กลุ่มวันนี้)"
-            onClick={() =>
-              onCreateNote(selectedGroup ?? ((activeNotePath && noteGroupName(activeNotePath)) || undefined))
-            }
+            title="โน้ตใหม่ในโปรเจคที่เลือก (Ctrl+N)"
+            onClick={() => onCreateNote(selectedProjectSlug ?? activeProjectSlug ?? undefined)}
           >
             <Plus size={15} />
           </button>
-          <button className="notes-action" title="สร้างกลุ่มใหม่" onClick={handleAddGroup}>
+          <button type="button" className="notes-action" title="สร้างโปรเจคใหม่" onClick={handleAddProject}>
             <FolderPlus size={15} />
           </button>
         </div>
       </div>
 
+      <div className="sidebar-filter">
+        <Search size={13} />
+        <input
+          type="search"
+          placeholder="กรองชื่อโปรเจค / โน้ต…"
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+        />
+      </div>
+
       <div className="notes-body">
-        {loaded && groups.length === 0 && (
+        {!backendOnline && (
           <p className="notes-empty">
-            ยังไม่มีโน้ต — กด + เพื่อสร้างโน้ตแรก
+            เชื่อมต่อ backend ในเครื่องไม่ได้
             <br />
-            (เก็บใน {rootDir || 'Documents\\PlainMark'})
+            กรุณาเปิดผ่าน <code>PlainMark.cmd</code> หรือ <code>start-plainmark.ps1</code>
           </p>
         )}
 
-        {visibleGroups.map((group) => (
+        {backendOnline && loaded && visibleProjects.length === 0 && (
+          <p className="notes-empty">
+            {filterText ? `ไม่พบรายการที่ตรงกับ "${filterText}"` : 'ยังไม่มีโปรเจค — กด + เพื่อเริ่มใช้งาน'}
+          </p>
+        )}
+
+        {visibleProjects.map((project) => (
           <NotesGroup
-            key={group.path}
-            group={group}
-            allGroups={visibleGroups}
+            key={project.slug}
+            project={project}
+            allProjects={projects.filter((p) => !hiddenPaths.includes(p.path))}
             onOpenNote={onOpenNote}
             onCreateNote={onCreateNote}
+            onNotice={onNotice}
             draggedNote={dragNote?.note ?? null}
-            isDropTarget={dragNote !== null && dragNote.fromGroup !== group.name}
-            isDragOver={dragOverGroup === group.name}
-            onNoteDragStart={(note) => setDragNote({ note, fromGroup: group.name })}
+            isDropTarget={dragNote !== null && dragNote.fromSlug !== project.slug}
+            isDragOver={dragOverSlug === project.slug}
+            onNoteDragStart={(note) => setDragNote({ note, fromSlug: project.slug })}
             onNoteDragEnd={endDrag}
-            onDragOverGroup={() => setDragOverGroup(group.name)}
-            onDragLeaveGroup={() => setDragOverGroup((current) => (current === group.name ? null : current))}
+            onDragOverProject={() => setDragOverSlug(project.slug)}
+            onDragLeaveProject={() => setDragOverSlug((cur) => (cur === project.slug ? null : cur))}
           />
         ))}
       </div>
 
       <div className="notes-foot">
-        <button
-          className="notes-root"
-          title={`โฟลเดอร์เก็บโน้ต:\n${rootDir}\n(คลิกเพื่อเปลี่ยน)`}
-          onClick={() => void changeRootViaDialog()}
-        >
-          <FolderCog size={14} />
-          <span className="notes-root-path">{rootDir || '…'}</span>
-        </button>
-        {hasCustomRoot && (
+        {legacyAvailable && (
           <button
-            className="notes-action"
-            title="กลับไปใช้โฟลเดอร์เริ่มต้น (Documents\PlainMark)"
-            onClick={() => void applyNotesRoot(null)}
+            type="button"
+            className="notes-import-btn"
+            disabled={importing}
+            title={`คัดลอกโน้ตเดิมจาก ${legacyPath} เข้ามา`}
+            onClick={() => void handleImportLegacy()}
           >
-            <RotateCcw size={13} />
+            <FolderArchive size={13} />
+            <span>{importing ? 'กำลังนำเข้า…' : 'นำเข้าโน้ตเดิม (Documents\\PlainMark)'}</span>
           </button>
         )}
+        <div className="notes-root-info" title={`ที่เก็บข้อมูลหลัก:\n${dataRoot}`}>
+          <FolderOpen size={13} />
+          <span className="notes-root-path">{dataRoot || 'PlainMarkData'}</span>
+        </div>
       </div>
+
       <div className="notes-resize-handle" role="separator" aria-orientation="vertical" onPointerDown={beginResize} />
     </aside>
   );

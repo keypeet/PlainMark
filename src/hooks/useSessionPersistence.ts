@@ -1,63 +1,100 @@
 import { useEffect, useRef } from 'react';
-import { flushNoteWrites, writeNoteQueued } from '../lib/noteService';
-import { hasTauri, tauriWindow } from '../lib/platform';
+import { flushNoteWrites, readNote, writeNoteQueued } from '../lib/noteService';
 import { flushSession, loadSession, saveSession } from '../lib/session';
 import { useDocStore } from '../store/docStore';
 
-// snapshot ล่าสุดที่บันทึกไปแล้ว — ใช้เทียบเพื่อข้ามการเขียนซ้ำเมื่อไม่มีอะไรเปลี่ยน
-// (โดยเฉพาะรอบที่ตามหลัง markSaved ซึ่งเปลี่ยนแค่ dirty; session ที่ฝังรูป base64 ใหญ่ + เขียนผ่าน OneDrive ช้า)
-let lastPersisted: { content: string; filePath: string | null; fileName: string; notePath: string | null } | null = null;
+let lastSessionFingerprint = '';
 
-// รวบรวมสถานะปัจจุบันแล้วบันทึก session + เนื้อหาโน้ต (ถ้าเปิดโน้ตอยู่)
-function persistNow(): Promise<void> {
-  const { content, file, notePath, dirty } = useDocStore.getState();
-  if (
-    lastPersisted &&
-    lastPersisted.content === content &&
-    lastPersisted.filePath === file.path &&
-    lastPersisted.fileName === file.name &&
-    lastPersisted.notePath === notePath
-  ) {
-    return Promise.resolve();
-  }
-  lastPersisted = { content, filePath: file.path, fileName: file.name, notePath };
-  const tasks: Promise<void>[] = [
-    saveSession({
-      content,
-      filePath: file.path,
-      fileName: file.name,
-      notePath,
-      dirty,
-      updatedAt: Date.now()
-    })
-  ];
-  if (notePath) tasks.push(writeNoteQueued(notePath, content));
-  return Promise.all(tasks).then(() => undefined);
+function serializeContentForSave(content: string, lineEnding: 'LF' | 'CRLF'): string {
+  return lineEnding === 'CRLF' ? content.replace(/\r?\n/g, '\r\n') : content.replace(/\r\n/g, '\n');
 }
 
-// วงจร "งานไม่มีวันหาย": กู้คืน session ตอนเปิดแอป → autosave ทุกจังหวะที่เอกสารเปลี่ยน
-// → flush ทุกคิวก่อนหน้าต่างปิดจริง
+function buildSessionPayload() {
+  const { tabs, activeTabId } = useDocStore.getState();
+  return {
+    tabs: tabs.map((tab) => ({
+      id: tab.id,
+      title: tab.title,
+      notePath: tab.notePath,
+      projectSlug: tab.projectSlug,
+      // สำหรับแท็บที่ผูกกับไฟล์โน้ตจริงและบันทึกแล้ว ไม่ต้องอัดเนื้อหาซ้ำใน session.json ให้หนัก
+      content: tab.notePath && !tab.dirty ? '' : tab.content,
+      dirty: tab.dirty,
+      lineEnding: tab.lineEnding
+    })),
+    activeTabId,
+    updatedAt: Date.now()
+  };
+}
+
+export async function persistActiveAndSession(): Promise<void> {
+  const state = useDocStore.getState();
+  const payload = buildSessionPayload();
+  const fingerprint = JSON.stringify({ tabs: payload.tabs, activeTabId: payload.activeTabId });
+
+  const tasks: Promise<void>[] = [];
+  for (const tab of state.tabs) {
+    if (tab.notePath && tab.dirty) {
+      const textToWrite = serializeContentForSave(tab.content, tab.lineEnding);
+      const tabId = tab.id;
+      const savedContent = tab.content;
+      tasks.push(
+        writeNoteQueued(tab.notePath, textToWrite).then(() => {
+          const latest = useDocStore.getState().tabs.find((t) => t.id === tabId);
+          if (latest && latest.content === savedContent) {
+            useDocStore.getState().markTabSaved(tabId, savedContent);
+          }
+        })
+      );
+    }
+  }
+
+  if (fingerprint !== lastSessionFingerprint) {
+    lastSessionFingerprint = fingerprint;
+    tasks.push(saveSession(payload));
+  }
+
+  await Promise.all(tasks);
+}
+
+// วงจร "งานไม่มีวันหาย": กู้คืนแท็บทั้งหมดตอนเปิดแอป → autosave ทุกจังหวะ → flush ก่อนปิดหน้าต่าง
 export function useSessionPersistence() {
   const sessionReady = useRef(false);
-  const content = useDocStore((state) => state.content);
-  const filePath = useDocStore((state) => state.file.path);
-  const fileName = useDocStore((state) => state.file.name);
-  const notePath = useDocStore((state) => state.notePath);
-  const dirty = useDocStore((state) => state.dirty);
+  const tabs = useDocStore((state) => state.tabs);
+  const activeTabId = useDocStore((state) => state.activeTabId);
 
-  // กู้คืน session เงียบๆ ตอนเปิดแอป (แบบ Notepad — ไม่ถาม ไม่มีทางหาย)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const session = await loadSession();
-        if (!cancelled && session && !useDocStore.getState().dirty) {
+        if (cancelled || !session) return;
+
+        if (Array.isArray(session.tabs) && session.tabs.length > 0) {
+          const restored = await Promise.all(
+            session.tabs.map(async (item) => {
+              if (!item.notePath) return item;
+              if (item.dirty && item.content) return item;
+              try {
+                const diskContent = await readNote(item.notePath);
+                return { ...item, content: diskContent, dirty: false };
+              } catch {
+                // ไฟล์ถูกลบจากภายนอกไปแล้ว → ข้ามแท็บนี้
+                return null;
+              }
+            })
+          );
+          const valid = restored.filter((item): item is NonNullable<typeof item> => item !== null);
+          if (!cancelled && valid.length > 0) {
+            useDocStore.getState().hydrateTabs({ tabs: valid, activeTabId: session.activeTabId ?? valid[0].id });
+          }
+        } else if (typeof session.content === 'string') {
           useDocStore.getState().hydrate({
             content: session.content,
-            filePath: session.filePath,
-            fileName: session.fileName,
-            notePath: session.notePath,
-            dirty: session.dirty
+            filePath: session.filePath ?? null,
+            fileName: session.fileName ?? 'Untitled.md',
+            notePath: session.notePath ?? null,
+            dirty: session.dirty === true
           });
         }
       } finally {
@@ -69,40 +106,49 @@ export function useSessionPersistence() {
     };
   }, []);
 
-  // บันทึกออโต้เสมอ (ไม่สนว่า dirty หรือไม่) — คงสภาพล่าสุดไว้ให้เปิดกลับมาเหมือนเดิม
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (!sessionReady.current) return;
-      void persistNow().then(() => {
-        const state = useDocStore.getState();
-        if (state.notePath && state.content === content) state.markSaved(content);
-      });
-    }, 800);
+      void persistActiveAndSession();
+    }, 650);
     return () => window.clearTimeout(timer);
-  }, [content, filePath, fileName, notePath, dirty]);
+  }, [tabs, activeTabId]);
 
-  // flush ก่อนหน้าต่างปิดจริง — หัวใจของ "กด X แล้วงานไม่หาย"
   useEffect(() => {
-    if (!hasTauri) return;
-    let unlisten: (() => void) | undefined;
-    let closing = false;
-    (async () => {
-      const { getCurrentWindow } = await tauriWindow();
-      const win = getCurrentWindow();
-      unlisten = await win.onCloseRequested(async (event) => {
-        if (closing) return;
-        closing = true;
-        event.preventDefault();
-        try {
-          await Promise.race([
-            persistNow().then(() => Promise.all([flushSession(), flushNoteWrites()])),
-            new Promise((resolve) => setTimeout(resolve, 3000))
-          ]);
-        } finally {
-          await win.destroy();
+    const onUnload = () => {
+      // ส่ง session + dirty note ด้วย sendBeacon / keepalive ก่อนปิดแท็บ/หน้าต่าง Edge
+      const payload = buildSessionPayload();
+      try {
+        localStorage.setItem('plainmark:session:v2', JSON.stringify(payload));
+      } catch {
+        // ignore
+      }
+      const { tabs: currentTabs } = useDocStore.getState();
+      for (const tab of currentTabs) {
+        if (tab.notePath && tab.dirty) {
+          const body = JSON.stringify({
+            path: tab.notePath,
+            content: serializeContentForSave(tab.content, tab.lineEnding),
+            mustExist: true
+          });
+          void fetch('/api/notes/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            keepalive: true
+          });
         }
+      }
+      void fetch('/api/session', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
       });
-    })();
-    return () => unlisten?.();
+      void flushSession();
+      void flushNoteWrites();
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 }
