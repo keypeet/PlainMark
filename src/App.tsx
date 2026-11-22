@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRightCircle, Copy, Trash2 } from 'lucide-react';
+import { AssistantDrawer } from './components/AssistantDrawer';
 import { ClosedHistoryModal } from './components/ClosedHistoryModal';
 import { CloseReasonModal, type CloseReasonTarget } from './components/CloseReasonModal';
 import { EditorPane } from './components/EditorPane';
 import { FindReplaceBar, type FindBarMode } from './components/FindReplaceBar';
 import { FormatToolbar } from './components/FormatToolbar';
-import { ModulePlaceholder } from './components/ModulePlaceholder';
+import { InsightsView } from './components/InsightsView';
+import { KnowledgeView } from './components/KnowledgeView';
+import { MeetingsView } from './components/MeetingsView';
 import { NotesListCard } from './components/NotesListCard';
 import { ProjectRail } from './components/ProjectRail';
 import { SearchModal } from './components/SearchModal';
@@ -17,7 +20,9 @@ import { useAppShortcuts } from './hooks/useAppShortcuts';
 import { useAppZoom } from './hooks/useAppZoom';
 import { persistActiveAndSession, useSessionPersistence } from './hooks/useSessionPersistence';
 import {
+  apiGetBoard,
   apiReadScratch,
+  apiSaveBoard,
   apiUpdateScratch,
   type ScratchMeta,
   type SearchHit
@@ -55,6 +60,8 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [closeTarget, setCloseTarget] = useState<CloseReasonTarget | null>(null);
   const [closedHistoryOpen, setClosedHistoryOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [boardRefreshKey, setBoardRefreshKey] = useState(0);
 
   const {
     activeTabId,
@@ -342,6 +349,22 @@ export default function App() {
       if (scratchId === closeTarget.idOrPath) {
         closeTab(activeTabId);
       }
+    } else if (closeTarget.itemType === 'card') {
+      await store.recordClosedItem({
+        itemType: 'card',
+        scope: closeTarget.scope,
+        title: closeTarget.title,
+        reason: payload.reason,
+        assignee: payload.assignee,
+        note: payload.note,
+        snapshot
+      });
+      const currentBoard = await apiGetBoard(closeTarget.scope);
+      await apiSaveBoard(closeTarget.scope, {
+        ...currentBoard,
+        cards: currentBoard.cards.filter((c) => c.id !== closeTarget.idOrPath)
+      });
+      setBoardRefreshKey((k) => k + 1);
     }
     setCloseTarget(null);
     showNotice('บันทึกเหตุผลและปิดรายการแล้ว');
@@ -363,6 +386,7 @@ export default function App() {
           onNewNote={() => void createNoteInActiveScope()}
           onNewScratch={() => void createPersistedScratch()}
           onOpenClosedHistory={() => setClosedHistoryOpen(true)}
+          onOpenAssistant={() => setAssistantOpen((v) => !v)}
         />
 
         {section === 'notes' ? (
@@ -466,10 +490,44 @@ export default function App() {
           </div>
         ) : section === 'settings' ? (
           <SettingsView onNotice={showNotice} />
+        ) : section === 'insights' ? (
+          <InsightsView
+            boardRefreshKey={boardRefreshKey}
+            onSelectSection={setSection}
+            onOpenNote={(note) => void openNote(note)}
+            onRequestClose={setCloseTarget}
+            onNotice={showNotice}
+          />
+        ) : section === 'meetings' ? (
+          <MeetingsView onNotice={showNotice} />
         ) : (
-          <ModulePlaceholder section={section} onBackToNotes={() => setSection('notes')} />
+          <KnowledgeView onNotice={showNotice} />
         )}
       </div>
+
+      <AssistantDrawer
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        onOpenNoteByPath={(path) => {
+          const st = useNotesStore.getState();
+          const allNotes = [
+            ...st.generalNotes,
+            ...st.projects.flatMap((p) => p.notes || [])
+          ];
+          const found = allNotes.find((n) => n.path === path);
+          if (found) {
+            void openNote(found);
+          } else {
+            void openNote({
+              name: path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || 'Note',
+              path,
+              projectSlug: 'Inbox',
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          }
+        }}
+      />
 
       <SearchModal
         open={searchOpen}
@@ -483,7 +541,10 @@ export default function App() {
       />
       <ClosedHistoryModal
         open={closedHistoryOpen}
-        onClose={() => setClosedHistoryOpen(false)}
+        onClose={() => {
+          setClosedHistoryOpen(false);
+          setBoardRefreshKey((k) => k + 1);
+        }}
         onNotice={showNotice}
       />
       <div className={`toast ${notice ? 'show' : ''}`}>{notice}</div>

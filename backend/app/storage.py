@@ -1144,7 +1144,31 @@ class WorkspaceStorage:
             )
             total = len(records)
             sliced = records[offset : offset + limit]
-            return {"items": sliced, "total": total, "limit": limit, "offset": offset}
+            inbox_items: list[dict] = []
+            broken_items: list[dict] = []
+            if scope in {"all", "general"}:
+                for bucket_name, target_list in (
+                    ("inbox", inbox_items),
+                    ("broken", broken_items),
+                ):
+                    bdir = self.general_root / MEETINGS_SUBDIR / bucket_name
+                    if not bdir.is_dir():
+                        continue
+                    for entry in sorted(bdir.iterdir(), key=lambda p: p.name):
+                        if not entry.is_dir():
+                            continue
+                        rec = self._load_meeting_summary_record("general", entry)
+                        if rec:
+                            rec["bucket"] = bucket_name
+                            target_list.append(rec)
+            return {
+                "items": sliced,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "inboxItems": inbox_items,
+                "brokenItems": broken_items,
+            }
 
     def create_meeting(self, payload: dict) -> dict:
         with self._op_lock:
@@ -1178,6 +1202,10 @@ class WorkspaceStorage:
                 "participants": list(payload.get("participants") or []),
                 "summary": str(payload.get("summary") or ""),
                 "actionItems": list(payload.get("actionItems") or []),
+                "keyframes": list(payload.get("keyframes") or []),
+                "audioUrl": str(payload.get("audioUrl") or ""),
+                "status": str(payload.get("status") or "ready"),
+                "errorState": payload.get("errorState"),
                 "provenance": payload.get("provenance"),
                 "createdAt": now,
                 "updatedAt": now,
@@ -1210,6 +1238,10 @@ class WorkspaceStorage:
                 "participants",
                 "summary",
                 "actionItems",
+                "keyframes",
+                "audioUrl",
+                "status",
+                "errorState",
                 "provenance",
             ):
                 if key in patch and patch[key] is not None:

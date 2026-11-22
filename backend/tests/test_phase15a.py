@@ -299,7 +299,12 @@ def test_board_closed_items_settings_and_smart_sync_provenance(tmp_path: Path) -
         '{"id": "bad-1", "title": "Broken"}', encoding="utf-8"
     )
 
-    assert client.get("/api/meetings", params={"scope": "general"}).json()["total"] == 0
+    meetings_payload = client.get("/api/meetings", params={"scope": "general"}).json()
+    assert meetings_payload["total"] == 0
+    assert len(meetings_payload["inboxItems"]) == 1
+    assert meetings_payload["inboxItems"][0]["id"] == "pending-1"
+    assert len(meetings_payload["brokenItems"]) == 1
+    assert meetings_payload["brokenItems"][0]["id"] == "bad-1"
 
     first_sync = client.post("/api/sync/smart", json={"scope": "general"}).json()["results"][0]
     assert first_sync["status"] == "synced"

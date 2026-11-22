@@ -1,4 +1,4 @@
-import { Archive, FilePlus2, StickyNote } from 'lucide-react';
+import { Archive, FilePlus2, Sparkles, StickyNote } from 'lucide-react';
 import { useNotesStore } from '../store/notesStore';
 import type { AppSection } from '../types';
 
@@ -8,6 +8,7 @@ interface TopNavBarProps {
   onNewNote: () => void;
   onNewScratch: () => void;
   onOpenClosedHistory: () => void;
+  onOpenAssistant: () => void;
 }
 
 const SECTION_TABS: Array<{ id: Exclude<AppSection, 'settings'>; label: string }> = [
@@ -22,7 +23,8 @@ export function TopNavBar({
   onSelectSection,
   onNewNote,
   onNewScratch,
-  onOpenClosedHistory
+  onOpenClosedHistory,
+  onOpenAssistant
 }: TopNavBarProps) {
   const { activeScope, setActiveScope, projects } = useNotesStore();
 
@@ -88,6 +90,14 @@ export function TopNavBar({
             </button>
           </>
         )}
+        <button
+          type="button"
+          className="v5-btn"
+          title="ผู้ช่วย AI ส่วนตัว"
+          onClick={onOpenAssistant}
+        >
+          <Sparkles size={14} /> ผู้ช่วย AI
+        </button>
         <button
           type="button"
           className="v5-btn"

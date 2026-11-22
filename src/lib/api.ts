@@ -81,6 +81,178 @@ export interface BackendSettings {
   sync?: {
     autoSyncEnabled?: boolean;
   };
+  meetingsWatch?: {
+    enabled?: boolean;
+    watchPath?: string;
+    sourceApp?: string;
+  };
+}
+
+export interface BoardColumn {
+  id: string;
+  title: string;
+}
+
+export interface BoardAttachment {
+  id: string;
+  kind: 'note' | 'meeting' | 'url';
+  label: string;
+  target: string;
+  date?: string;
+}
+
+export interface BoardCard {
+  id: string;
+  columnId: string;
+  text: string;
+  color: string;
+  x?: number;
+  y?: number;
+  links?: BoardAttachment[];
+  createdAt?: number;
+  updatedAt?: number;
+  isNew?: boolean;
+}
+
+export interface BoardData {
+  mode: 'pinboard' | 'columns';
+  columns: BoardColumn[];
+  cards: BoardCard[];
+  customColors: string[];
+  updatedAt?: number;
+}
+
+export interface InsightsProvenance {
+  provider: string;
+  model: string;
+  effort: string;
+  prompt_version: string;
+  generated_at: string;
+  source_hash: string;
+}
+
+export interface InsightsSummary {
+  notesCount: number;
+  meetingsCount: number;
+  knowledgeCount: number;
+  unreadKnowledgeCount: number;
+  recentNoteTitles: string[];
+  recentMeetingSummaries: Array<{ id: string; title: string; summary: string }>;
+  recentKnowledgeSummaries: Array<{ id: string; title: string; summary: string }>;
+}
+
+export interface InsightsDoc {
+  scope: string;
+  summary: InsightsSummary;
+  provenance: InsightsProvenance;
+}
+
+export interface SmartSyncResult {
+  scope: string;
+  status: string;
+  tokensUsed: number;
+  source_hash: string;
+  insights?: InsightsDoc;
+}
+
+export interface AssistantQueryResponse {
+  query: string;
+  scope: string;
+  provider: string;
+  model: string;
+  filteredLocalOnlyMeetings: number;
+  redacted: boolean;
+  sources: {
+    notes: Array<{ title: string; path: string; scope: string }>;
+    noteHits: Array<{ title: string; path: string; snippet: string }>;
+    meetings: Array<{ id: string; title: string; summary: string; visibility: string }>;
+    knowledge: Array<{ id: string; title: string; summary: string }>;
+  };
+}
+
+export interface MeetingSegment {
+  id?: string;
+  start?: number;
+  end?: number;
+  timestamp?: string;
+  speakerId?: string;
+  speakerName?: string;
+  speaker?: string;
+  text: string;
+}
+
+export interface MeetingKeyframe {
+  id?: string;
+  timestamp?: string;
+  timeSec?: number;
+  imageUrl?: string;
+  caption?: string;
+  ocrText?: string;
+}
+
+export interface MeetingParticipant {
+  speakerId?: string;
+  name: string;
+  nickname?: string;
+  email?: string;
+}
+
+export interface MeetingActionItem {
+  id?: string;
+  text: string;
+  assignee?: string;
+  done?: boolean;
+}
+
+export interface MeetingErrorState {
+  code: 'large_file' | 'asr_interrupted' | 'model_offline' | 'generic';
+  message: string;
+  detail?: string;
+  canResume?: boolean;
+  fileSizeGb?: number;
+}
+
+export interface MeetingRecord {
+  id: string;
+  scope: string;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  visibility: 'local_only' | 'shareable';
+  participants: MeetingParticipant[];
+  summary: string;
+  actionItems: MeetingActionItem[];
+  keyframes?: MeetingKeyframe[];
+  audioUrl?: string;
+  status?: string;
+  errorState?: MeetingErrorState | null;
+  provenance?: InsightsProvenance | null;
+  segments?: MeetingSegment[];
+  bucket?: 'inbox' | 'broken';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MeetingHistorySnapshot {
+  name: string;
+  path: string;
+  savedAt: number;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  scope: string;
+  title: string;
+  url: string;
+  sourceType: string;
+  reason: string;
+  summary: string;
+  read: boolean;
+  date: string;
+  provenance?: InsightsProvenance | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface CliInfo {
@@ -374,10 +546,37 @@ export function apiDiscoverClis(): Promise<CliCache> {
   return requestJson('/api/cli/discover', jsonInit('POST', {}));
 }
 
-export function apiSmartSync(body: { scope?: string; force?: boolean } = {}): Promise<{
-  results: Array<{ scope: string; status: string; tokensUsed: number; source_hash: string }>;
+export function apiSmartSync(body: {
+  scope?: string;
+  force?: boolean;
+  provider?: string;
+  model?: string;
+  effort?: string;
+} = {}): Promise<{
+  results: SmartSyncResult[];
 }> {
   return requestJson('/api/sync/smart', jsonInit('POST', body));
+}
+
+export function apiGetBoard(scope = 'general'): Promise<BoardData> {
+  const normalized = scope === 'all' ? 'general' : scope;
+  return requestJson(`/api/board?scope=${encodeURIComponent(normalized)}`);
+}
+
+export function apiSaveBoard(scope: string, payload: BoardData): Promise<BoardData> {
+  const normalized = scope === 'all' ? 'general' : scope;
+  return requestJson(`/api/board?scope=${encodeURIComponent(normalized)}`, jsonInit('PUT', payload));
+}
+
+export function apiQueryAssistant(body: {
+  query: string;
+  scope?: string;
+  includeAllScopes?: boolean;
+  provider?: string;
+  model?: string;
+  allowLocalOnly?: boolean;
+}): Promise<AssistantQueryResponse> {
+  return requestJson('/api/assistant/query', jsonInit('POST', body));
 }
 
 export function apiRunBackup(body: {
@@ -433,12 +632,99 @@ export function apiDeleteContact(contactId: string): Promise<{ deleted: boolean 
   return requestJson(`/api/contacts/${encodeURIComponent(contactId)}`, { method: 'DELETE' });
 }
 
-export function apiListMeetings(scope = 'all', limit = 20): Promise<{ items: unknown[]; total: number }> {
-  const params = new URLSearchParams({ scope, limit: String(limit) });
+export function apiListMeetings(
+  scope = 'all',
+  options?: number | { limit?: number; offset?: number; q?: string; includeHidden?: boolean }
+): Promise<{
+  items: MeetingRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  inboxItems?: MeetingRecord[];
+  brokenItems?: MeetingRecord[];
+}> {
+  const opts = typeof options === 'number' ? { limit: options } : options ?? {};
+  const params = new URLSearchParams({
+    scope,
+    limit: String(opts.limit ?? 20),
+    offset: String(opts.offset ?? 0)
+  });
+  if (opts.q) params.set('q', opts.q);
+  if (opts.includeHidden) params.set('includeHidden', 'true');
   return requestJson(`/api/meetings?${params.toString()}`);
 }
 
-export function apiListKnowledge(scope = 'all'): Promise<{ items: unknown[] }> {
+export function apiCreateMeeting(payload: Partial<MeetingRecord>): Promise<MeetingRecord> {
+  return requestJson('/api/meetings', jsonInit('POST', payload));
+}
+
+export function apiGetMeeting(meetingId: string): Promise<MeetingRecord> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}`);
+}
+
+export function apiUpdateMeeting(
+  meetingId: string,
+  patch: Partial<MeetingRecord>
+): Promise<MeetingRecord> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}`, jsonInit('PATCH', patch));
+}
+
+export function apiDeleteMeeting(meetingId: string): Promise<{ deleted: boolean }> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}`, { method: 'DELETE' });
+}
+
+export function apiUpdateMeetingTranscript(
+  meetingId: string,
+  segments: MeetingSegment[],
+  reason = 'edit'
+): Promise<MeetingRecord> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/transcript`,
+    jsonInit('PUT', { segments, reason })
+  );
+}
+
+export function apiRenameMeetingSpeaker(
+  meetingId: string,
+  oldSpeakerId: string,
+  newName: string,
+  newSpeakerId?: string
+): Promise<MeetingRecord> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/rename-speaker`,
+    jsonInit('POST', { oldSpeakerId, newName, newSpeakerId })
+  );
+}
+
+export function apiListMeetingHistory(
+  meetingId: string
+): Promise<{ snapshots: MeetingHistorySnapshot[] }> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}/history`);
+}
+
+export function apiListKnowledge(
+  scope = 'all',
+  filters?: { read?: boolean; date?: string; dateFrom?: string; dateTo?: string }
+): Promise<{ items: KnowledgeItem[] }> {
   const params = new URLSearchParams({ scope });
+  if (filters?.read !== undefined) params.set('read', String(filters.read));
+  if (filters?.date) params.set('date', filters.date);
+  if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+  if (filters?.dateTo) params.set('dateTo', filters.dateTo);
   return requestJson(`/api/knowledge?${params.toString()}`);
+}
+
+export function apiCreateKnowledge(payload: Partial<KnowledgeItem>): Promise<KnowledgeItem> {
+  return requestJson('/api/knowledge', jsonInit('POST', payload));
+}
+
+export function apiUpdateKnowledge(
+  itemId: string,
+  patch: Partial<KnowledgeItem>
+): Promise<KnowledgeItem> {
+  return requestJson(`/api/knowledge/${encodeURIComponent(itemId)}`, jsonInit('PATCH', patch));
+}
+
+export function apiDeleteKnowledge(itemId: string): Promise<{ deleted: boolean }> {
+  return requestJson(`/api/knowledge/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
 }

@@ -107,6 +107,8 @@ export function SettingsView({ onNotice }: SettingsViewProps) {
   const [newContactNick, setNewContactNick] = useState('');
   const [newContactEmail, setNewContactEmail] = useState('');
   const [backupDest, setBackupDest] = useState('');
+  const [watchPath, setWatchPath] = useState('');
+  const [watchSourceApp, setWatchSourceApp] = useState('OBS Studio');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -114,6 +116,15 @@ export function SettingsView({ onNotice }: SettingsViewProps) {
       setBackupDest(backendSettings.backup.destination);
     }
   }, [backendSettings?.backup?.destination]);
+
+  useEffect(() => {
+    if (backendSettings?.meetingsWatch?.watchPath !== undefined) {
+      setWatchPath(backendSettings.meetingsWatch.watchPath);
+    }
+    if (backendSettings?.meetingsWatch?.sourceApp) {
+      setWatchSourceApp(backendSettings.meetingsWatch.sourceApp);
+    }
+  }, [backendSettings?.meetingsWatch?.watchPath, backendSettings?.meetingsWatch?.sourceApp]);
 
   useEffect(() => {
     if (activeTab === 'meetings') {
@@ -494,6 +505,54 @@ export function SettingsView({ onNotice }: SettingsViewProps) {
                 />
                 โหมดไม่ระบุตัวตน (Anonymous Mode — ใช้รหัส Speaker แทนชื่อจริง)
               </label>
+            </div>
+
+            <div className="settings-card">
+              <h3>ตัวเฝ้าไฟล์อัดหน้าจอ (OBS / Watch Folder สำหรับ Plan 2.5)</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(backendSettings?.meetingsWatch?.enabled ?? false)}
+                  onChange={(e) => {
+                    void patchBackendSettings({
+                      meetingsWatch: { enabled: e.target.checked }
+                    }).then(() => onNotice('บันทึกสถานะ Watch Folder แล้ว'));
+                  }}
+                />
+                เปิดตรวจโฟลเดอร์ไฟล์อัดใหม่เข้า <code>general/meetings/inbox/</code> อัตโนมัติ
+              </label>
+              <div className="settings-row">
+                <input
+                  className="settings-input"
+                  style={{ flex: 1 }}
+                  placeholder="โฟลเดอร์เก็บไฟล์อัด เช่น C:\\Users\\KeyPe\\Videos"
+                  value={watchPath}
+                  onChange={(e) => setWatchPath(e.target.value)}
+                />
+                <select
+                  className="settings-select"
+                  value={watchSourceApp}
+                  onChange={(e) => setWatchSourceApp(e.target.value)}
+                >
+                  <option value="OBS Studio">OBS Studio</option>
+                  <option value="Windows Sound Recorder">Windows Sound Recorder</option>
+                  <option value="Custom Folder">Custom Folder</option>
+                </select>
+                <button
+                  type="button"
+                  className="v5-btn"
+                  onClick={() => {
+                    void patchBackendSettings({
+                      meetingsWatch: {
+                        watchPath: watchPath.trim(),
+                        sourceApp: watchSourceApp
+                      }
+                    }).then(() => onNotice('บันทึก Watch Folder แล้ว'));
+                  }}
+                >
+                  บันทึก Watch Folder
+                </button>
+              </div>
             </div>
 
             <div className="settings-card">
