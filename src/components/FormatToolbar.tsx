@@ -52,7 +52,8 @@ const headingItems = [
 
 export function FormatToolbar({ editorRef, onOpenFind, onOpenGlobalSearch }: FormatToolbarProps) {
   const content = useDocStore((state) => state.content);
-  const { viewMode, toggleViewMode, wordWrap, toggleWordWrap } = useSettingsStore();
+  const { viewMode, toggleViewMode, wordWrap, toggleWordWrap, editorWidth, setEditorWidth } =
+    useSettingsStore();
   const [openMenu, setOpenMenu] = useState<MenuKind>(null);
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
@@ -376,6 +377,33 @@ export function FormatToolbar({ editorRef, onOpenFind, onOpenGlobalSearch }: For
       </button>
 
       <div className="spacer" />
+
+      <div className="v5-pill-switch" role="group" aria-label="ความกว้างกระดาษ">
+        <button
+          type="button"
+          className={editorWidth === 'narrow' ? 'active' : ''}
+          title="พอดีอ่าน 760px"
+          onClick={() => setEditorWidth('narrow')}
+        >
+          760px
+        </button>
+        <button
+          type="button"
+          className={editorWidth === 'wide' ? 'active' : ''}
+          title="กว้าง 1040px"
+          onClick={() => setEditorWidth('wide')}
+        >
+          1040px
+        </button>
+        <button
+          type="button"
+          className={editorWidth === 'full' ? 'active' : ''}
+          title="เต็มจอ 100%"
+          onClick={() => setEditorWidth('full')}
+        >
+          100%
+        </button>
+      </div>
 
       <button
         type="button"

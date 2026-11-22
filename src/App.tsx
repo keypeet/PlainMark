@@ -1,28 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  BookMarked,
-  BrainCircuit,
-  EyeOff,
-  Mic,
-  Moon,
-  NotebookTabs,
-  Search,
-  Sun
-} from 'lucide-react';
+import { ArrowRightCircle, Copy, Trash2 } from 'lucide-react';
+import { ClosedHistoryModal } from './components/ClosedHistoryModal';
+import { CloseReasonModal, type CloseReasonTarget } from './components/CloseReasonModal';
 import { EditorPane } from './components/EditorPane';
-import { FindReplaceBar } from './components/FindReplaceBar';
-import type { FindBarMode } from './components/FindReplaceBar';
+import { FindReplaceBar, type FindBarMode } from './components/FindReplaceBar';
 import { FormatToolbar } from './components/FormatToolbar';
-import { HiddenItemsPanel } from './components/HiddenItemsPanel';
 import { ModulePlaceholder } from './components/ModulePlaceholder';
-import { NotesSidebar } from './components/NotesSidebar';
+import { NotesListCard } from './components/NotesListCard';
+import { ProjectRail } from './components/ProjectRail';
 import { SearchModal } from './components/SearchModal';
+import { SettingsView } from './components/SettingsView';
 import { StatusBar } from './components/StatusBar';
 import { TabBar } from './components/TabBar';
+import { TopNavBar } from './components/TopNavBar';
 import { useAppShortcuts } from './hooks/useAppShortcuts';
 import { useAppZoom } from './hooks/useAppZoom';
 import { persistActiveAndSession, useSessionPersistence } from './hooks/useSessionPersistence';
-import type { SearchHit } from './lib/api';
+import {
+  apiReadScratch,
+  apiUpdateScratch,
+  type ScratchMeta,
+  type SearchHit
+} from './lib/api';
 import { exportTextFile, openTextFile } from './lib/fileService';
 import { inlineNoteImages } from './lib/imageAssets';
 import { flushNoteWrites, noteGroupName, readNote, writeNoteQueued } from './lib/noteService';
@@ -30,13 +29,7 @@ import type { NoteMeta } from './lib/noteService';
 import { useDocStore } from './store/docStore';
 import { useNotesStore } from './store/notesStore';
 import { useSettingsStore } from './store/settingsStore';
-import type { AppSection, EditorApi, ThemeMode } from './types';
-
-function themeLabel(theme: ThemeMode): string {
-  if (theme === 'dark') return 'Dark';
-  if (theme === 'light') return 'Light';
-  return 'System';
-}
+import type { AppSection, EditorApi, EditorWidthPreset } from './types';
 
 function automaticNoteTitle(content: string): string | null {
   const firstLine = content
@@ -48,55 +41,91 @@ function automaticNoteTitle(content: string): string | null {
   return cleanTitle ? Array.from(cleanTitle).slice(0, 36).join('') : null;
 }
 
+function editorWidthValue(preset: EditorWidthPreset): string {
+  if (preset === 'narrow') return '760px';
+  if (preset === 'full') return '100%';
+  return '1040px';
+}
+
 export default function App() {
   const editorRef = useRef<EditorApi | null>(null);
   const [notice, setNotice] = useState('');
   const [section, setSection] = useState<AppSection>('notes');
-  const [sidebarView, setSidebarView] = useState<'notes' | 'hidden'>('notes');
   const [findMode, setFindMode] = useState<FindBarMode>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [closeTarget, setCloseTarget] = useState<CloseReasonTarget | null>(null);
+  const [closedHistoryOpen, setClosedHistoryOpen] = useState(false);
 
-  const { activeTabId, content, file, notePath, projectSlug, closeTab, markSaved, openNoteTab, openScratchTab } =
-    useDocStore();
-  const { viewMode, theme, sidebarOpen, sidebarWidth, toggleViewMode, setTheme, toggleSidebar, setSidebarWidth } =
-    useSettingsStore();
+  const {
+    activeTabId,
+    content,
+    file,
+    notePath,
+    scratchId,
+    closeTab,
+    closeNotePath,
+    markSaved,
+    openNoteTab,
+    openScratchTab,
+    openPersistedScratchTab
+  } = useDocStore();
+
+  const {
+    viewMode,
+    theme,
+    accentColor,
+    fontFamily,
+    fontSize,
+    editorWidth,
+    toggleViewMode,
+    loadBackendSettings
+  } = useSettingsStore();
+
+  const activeScope = useNotesStore((s) => s.activeScope);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
-    window.setTimeout(() => setNotice(''), 2000);
+    window.setTimeout(() => setNotice(''), 2200);
   }, []);
-
-  const showSidebarView = useCallback(
-    (view: 'notes' | 'hidden') => {
-      if (section !== 'notes') {
-        setSection('notes');
-        setSidebarView(view);
-        if (!sidebarOpen) toggleSidebar();
-        return;
-      }
-      if (sidebarOpen && sidebarView === view) {
-        toggleSidebar();
-        return;
-      }
-      setSidebarView(view);
-      if (!sidebarOpen) toggleSidebar();
-    },
-    [section, sidebarOpen, sidebarView, toggleSidebar]
-  );
 
   const changeZoom = useAppZoom(showNotice);
   useSessionPersistence();
+
+  useEffect(() => {
+    void useNotesStore.getState().refresh();
+    void loadBackendSettings();
+  }, [loadBackendSettings]);
+
+  // Apply V5 live appearance tokens
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.accent = accentColor;
+    root.dataset.font = fontFamily;
+    root.style.setProperty('--fs-base', `${fontSize}px`);
+    root.style.setProperty('--editor-max-w', editorWidthValue(editorWidth));
+  }, [theme, accentColor, fontFamily, fontSize, editorWidth]);
+
+  // Autosave persisted scratchpad edits to scratch/
+  useEffect(() => {
+    if (!scratchId) return;
+    const capturedId = scratchId;
+    const timer = window.setTimeout(() => {
+      if (useDocStore.getState().scratchId !== capturedId) return;
+      void apiUpdateScratch(capturedId, content).then(() => {
+        useDocStore.getState().markSaved(content);
+      });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [content, scratchId]);
 
   const openNote = useCallback(
     async (note: NoteMeta) => {
       try {
         await flushNoteWrites();
         const noteContent = await readNote(note.path);
-        openNoteTab(
-          { path: note.path, name: note.name, projectSlug: note.projectSlug || noteGroupName(note.path) || 'Inbox' },
-          noteContent
-        );
-        useNotesStore.getState().selectProject(note.projectSlug || noteGroupName(note.path));
+        const slug = note.projectSlug || noteGroupName(note.path) || 'Inbox';
+        openNoteTab({ path: note.path, name: note.name, projectSlug: slug }, noteContent);
         setSection('notes');
         editorRef.current?.focus();
       } catch (error) {
@@ -107,23 +136,46 @@ export default function App() {
     [openNoteTab, showNotice]
   );
 
-  const createNote = useCallback(
-    async (targetProjectSlug?: string) => {
-      await flushNoteWrites();
-      const note = await useNotesStore.getState().addNote(targetProjectSlug);
-      if (note) {
-        await openNote(note);
-      } else {
-        openScratchTab('Untitled', '');
+  const openScratch = useCallback(
+    async (sc: ScratchMeta) => {
+      try {
+        const doc = await apiReadScratch(sc.id);
+        openPersistedScratchTab({ id: doc.id, title: doc.title, content: doc.content });
+        setSection('notes');
+        editorRef.current?.focus();
+      } catch (error) {
+        console.error('PlainMark: open scratch failed', error);
+        showNotice('เปิดกระดาษร่างไม่สำเร็จ');
       }
     },
-    [openNote, openScratchTab]
+    [openPersistedScratchTab, showNotice]
   );
 
-  const handleNew = useCallback(() => {
-    const target = useNotesStore.getState().selectedProjectSlug ?? projectSlug ?? undefined;
-    void createNote(target);
-  }, [createNote, projectSlug]);
+  const createNoteInActiveScope = useCallback(async () => {
+    await flushNoteWrites();
+    const note = await useNotesStore.getState().addNoteInScope(activeScope);
+    if (note) {
+      await openNote(note);
+    } else {
+      openScratchTab('Untitled', '');
+    }
+  }, [activeScope, openNote, openScratchTab]);
+
+  const createPersistedScratch = useCallback(async () => {
+    const created = await useNotesStore.getState().addScratch();
+    if (created) {
+      openPersistedScratchTab({
+        id: created.id,
+        title: created.title,
+        content: created.content
+      });
+      setSection('notes');
+      editorRef.current?.focus();
+      showNotice('สร้างกระดาษร่างแล้ว');
+    } else {
+      openScratchTab('Untitled', '');
+    }
+  }, [openPersistedScratchTab, openScratchTab, showNotice]);
 
   const handleOpenExternal = useCallback(async () => {
     const loaded = await openTextFile();
@@ -135,6 +187,12 @@ export default function App() {
 
   const handleSave = useCallback(async () => {
     const state = useDocStore.getState();
+    if (state.scratchId) {
+      await apiUpdateScratch(state.scratchId, state.content);
+      markSaved(state.content);
+      showNotice('บันทึกกระดาษร่างแล้ว');
+      return;
+    }
     if (state.notePath) {
       const text =
         state.lineEnding === 'CRLF'
@@ -145,9 +203,8 @@ export default function App() {
       showNotice('บันทึกแล้ว');
       return;
     }
-    // Draft tab without a notePath yet -> save into selected project as a real note!
     const title = automaticNoteTitle(state.content) || 'Untitled';
-    const created = await useNotesStore.getState().addNote(undefined, title);
+    const created = await useNotesStore.getState().addNoteInScope(activeScope, title);
     if (!created) {
       showNotice('บันทึกไม่สำเร็จ (backend ออฟไลน์)');
       return;
@@ -156,8 +213,8 @@ export default function App() {
     useDocStore.getState().setNotePath(created.path);
     useDocStore.getState().syncNoteMeta(created.path, created);
     markSaved(state.content);
-    showNotice(`บันทึกเข้าโปรเจค ${created.projectSlug} แล้ว`);
-  }, [markSaved, showNotice]);
+    showNotice('บันทึกโน้ตแล้ว');
+  }, [activeScope, markSaved, showNotice]);
 
   const handleSaveAll = useCallback(async () => {
     await persistActiveAndSession();
@@ -187,14 +244,9 @@ export default function App() {
     [openNote]
   );
 
-  const cycleTheme = useCallback(() => {
-    const nextTheme: ThemeMode = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
-    setTheme(nextTheme);
-  }, [setTheme, theme]);
-
   const shortcutHandlers = useMemo(
     () => ({
-      onNew: handleNew,
+      onNew: () => void createNoteInActiveScope(),
       onOpen: () => void handleOpenExternal(),
       onSave: () => void handleSave(),
       onSaveAll: () => void handleSaveAll(),
@@ -205,16 +257,32 @@ export default function App() {
       onToggleViewMode: toggleViewMode,
       changeZoom
     }),
-    [changeZoom, closeTab, handleNew, handleOpenExternal, handleSave, handleSaveAll, toggleViewMode]
+    [
+      changeZoom,
+      closeTab,
+      createNoteInActiveScope,
+      handleOpenExternal,
+      handleSave,
+      handleSaveAll,
+      toggleViewMode
+    ]
   );
 
   useAppShortcuts(shortcutHandlers);
 
+  // Also bind Ctrl+K for Quick Search
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
-  // Auto-rename brand-new "new note" from its first line safely (captured notePath + content)
+  // Auto-rename brand-new "new note" from its first line safely
   useEffect(() => {
     if (!notePath || !/^new note(?: \(\d+\))?\.md$/i.test(file.name)) return;
     const title = automaticNoteTitle(content);
@@ -233,134 +301,191 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [content, file.name, notePath]);
 
+  const handleConfirmClose = async (payload: {
+    reason: string;
+    assignee: string;
+    note: string;
+  }) => {
+    if (!closeTarget) return;
+    const store = useNotesStore.getState();
+    let snapshot = { ...closeTarget.snapshot };
+    if (closeTarget.itemType === 'note') {
+      const currentContent =
+        notePath === closeTarget.idOrPath
+          ? content
+          : await readNote(closeTarget.idOrPath).catch(() => '');
+      snapshot = { ...snapshot, content: currentContent };
+      await store.recordClosedItem({
+        itemType: 'note',
+        scope: closeTarget.scope,
+        title: closeTarget.title,
+        reason: payload.reason,
+        assignee: payload.assignee,
+        note: payload.note,
+        snapshot
+      });
+      await store.removeNote(closeTarget.idOrPath);
+      closeNotePath(closeTarget.idOrPath);
+    } else if (closeTarget.itemType === 'scratch') {
+      const doc = await apiReadScratch(closeTarget.idOrPath).catch(() => null);
+      snapshot = { ...snapshot, content: doc?.content ?? '' };
+      await store.recordClosedItem({
+        itemType: 'scratch',
+        scope: 'general',
+        title: closeTarget.title,
+        reason: payload.reason,
+        assignee: payload.assignee,
+        note: payload.note,
+        snapshot
+      });
+      await store.removeScratch(closeTarget.idOrPath);
+      if (scratchId === closeTarget.idOrPath) {
+        closeTab(activeTabId);
+      }
+    }
+    setCloseTarget(null);
+    showNotice('บันทึกเหตุผลและปิดรายการแล้ว');
+  };
+
   return (
-    <div className="app-shell">
-      <TabBar
-        onNewTab={handleNew}
-        onOpenExternal={() => void handleOpenExternal()}
-        onSaveAll={() => void handleSaveAll()}
-        onExport={(ext) => void handleExport(ext)}
+    <div className="v5-shell">
+      <ProjectRail
+        section={section}
+        onSelectSection={setSection}
+        onOpenSearch={() => setSearchOpen(true)}
+        onNotice={showNotice}
       />
 
-      {section === 'notes' && (
-        <FormatToolbar
-          editorRef={editorRef}
-          onOpenFind={() => setFindMode('find')}
-          onOpenGlobalSearch={() => setSearchOpen(true)}
+      <div className="v5-main">
+        <TopNavBar
+          section={section}
+          onSelectSection={setSection}
+          onNewNote={() => void createNoteInActiveScope()}
+          onNewScratch={() => void createPersistedScratch()}
+          onOpenClosedHistory={() => setClosedHistoryOpen(true)}
         />
-      )}
-
-      <main
-        className={`workspace ${section === 'notes' && sidebarOpen ? 'with-notes' : ''}`}
-        style={{ '--notes-width': `${sidebarWidth}px` } as React.CSSProperties}
-      >
-        <aside className="activity-bar" aria-label="Workspace modules">
-          <button
-            type="button"
-            className={`activity-button ${section === 'notes' && sidebarOpen && sidebarView === 'notes' ? 'active' : ''}`}
-            title="Notes & Projects (แผน 1)"
-            aria-label="โปรเจคและโน้ต"
-            onClick={() => showSidebarView('notes')}
-          >
-            <NotebookTabs size={19} />
-          </button>
-          <button
-            type="button"
-            className={`activity-button ${section === 'meetings' ? 'active' : ''}`}
-            title="Meetings — MP4 & Audio (แผน 2)"
-            aria-label="การประชุม"
-            onClick={() => setSection('meetings')}
-          >
-            <Mic size={19} />
-          </button>
-          <button
-            type="button"
-            className={`activity-button ${section === 'knowledge' ? 'active' : ''}`}
-            title="Knowledge Hub — Links & Docs (แผน 3)"
-            aria-label="คลังความรู้"
-            onClick={() => setSection('knowledge')}
-          >
-            <BookMarked size={19} />
-          </button>
-          <button
-            type="button"
-            className={`activity-button ${section === 'insights' ? 'active' : ''}`}
-            title="Personal AI Insights (แผนพิเศษ)"
-            aria-label="ภาพรวมและตัวตน"
-            onClick={() => setSection('insights')}
-          >
-            <BrainCircuit size={19} />
-          </button>
-
-          <div className="activity-spacer" />
-
-          <button
-            type="button"
-            className="activity-button"
-            title="ค้นหาข้ามทุกโปรเจค (Ctrl+P)"
-            aria-label="ค้นหาโน้ต"
-            onClick={() => setSearchOpen(true)}
-          >
-            <Search size={18} />
-          </button>
-          <button
-            type="button"
-            className={`activity-button ${section === 'notes' && sidebarOpen && sidebarView === 'hidden' ? 'active' : ''}`}
-            title="รายการที่ซ่อน"
-            aria-label="รายการที่ซ่อน"
-            onClick={() => showSidebarView('hidden')}
-          >
-            <EyeOff size={18} />
-          </button>
-          <button
-            type="button"
-            className="activity-button"
-            title={`ธีม: ${themeLabel(theme)}`}
-            aria-label="สลับธีม"
-            onClick={cycleTheme}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </aside>
 
         {section === 'notes' ? (
-          <>
-            {sidebarOpen &&
-              (sidebarView === 'hidden' ? (
-                <HiddenItemsPanel onOpenNote={(note) => void openNote(note)} />
-              ) : (
-                <NotesSidebar
-                  onOpenNote={(note) => void openNote(note)}
-                  onCreateNote={(slug) => void createNote(slug)}
-                  onNotice={showNotice}
-                  width={sidebarWidth}
-                  onResize={setSidebarWidth}
-                />
-              ))}
+          <div className="notes-workspace-shell">
+            <NotesListCard
+              onOpenNote={(note) => void openNote(note)}
+              onOpenScratch={(sc) => void openScratch(sc)}
+              onRequestClose={setCloseTarget}
+              onNotice={showNotice}
+            />
 
-            <div className="editor-stage">
-              <FindReplaceBar
-                mode={findMode}
+            <div className={`notes-editor-card ${scratchId ? 'is-scratch' : ''}`}>
+              <TabBar
+                onNewTab={() => void createNoteInActiveScope()}
+                onOpenExternal={() => void handleOpenExternal()}
+                onSaveAll={() => void handleSaveAll()}
+                onExport={(ext) => void handleExport(ext)}
+              />
+
+              <FormatToolbar
                 editorRef={editorRef}
-                onClose={() => setFindMode(null)}
-                onModeChange={setFindMode}
-                onNotice={showNotice}
+                onOpenFind={() => setFindMode('find')}
+                onOpenGlobalSearch={() => setSearchOpen(true)}
               />
-              <EditorPane
-                ref={editorRef}
-                tabId={activeTabId}
-                documentPath={notePath}
-                viewMode={viewMode}
-              />
+
+              {scratchId && (
+                <div className="scratch-banner">
+                  <span>กระดาษร่างชั่วคราว (ไม่รวมใน AI Insights และ source_hash)</span>
+                  <div className="scratch-banner-actions">
+                    <button
+                      type="button"
+                      className="v5-btn"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(content);
+                        showNotice('คัดลอก Prompt ทั้งหมดแล้ว');
+                      }}
+                    >
+                      <Copy size={13} /> คัดลอก Prompt
+                    </button>
+                    <button
+                      type="button"
+                      className="v5-btn primary"
+                      onClick={() => {
+                        const targetScope = activeScope === 'all' ? 'general' : activeScope;
+                        void useNotesStore
+                          .getState()
+                          .promoteScratch(scratchId, targetScope, file.name.replace(/\.md$/i, ''))
+                          .then((note) => {
+                            if (note) {
+                              closeTab(activeTabId);
+                              void openNote(note);
+                              showNotice('เก็บเป็นโน้ตจริงแล้ว');
+                            }
+                          });
+                      }}
+                    >
+                      <ArrowRightCircle size={13} /> เก็บเป็นโน้ต
+                    </button>
+                    <button
+                      type="button"
+                      className="v5-btn danger"
+                      onClick={() =>
+                        setCloseTarget({
+                          itemType: 'scratch',
+                          scope: 'general',
+                          title: file.name.replace(/\.md$/i, ''),
+                          idOrPath: scratchId,
+                          snapshot: { id: scratchId, title: file.name.replace(/\.md$/i, '') }
+                        })
+                      }
+                    >
+                      <Trash2 size={13} /> ลบทิ้ง
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="editor-main-area">
+                <div className="editor-pane-wrap">
+                  <div className="editor-pane-inner">
+                    <EditorPane
+                      ref={editorRef}
+                      tabId={activeTabId}
+                      documentPath={notePath}
+                      viewMode={viewMode}
+                    />
+                  </div>
+                </div>
+
+                <FindReplaceBar
+                  mode={findMode}
+                  editorRef={editorRef}
+                  onClose={() => setFindMode(null)}
+                  onModeChange={setFindMode}
+                  onNotice={showNotice}
+                />
+              </div>
+
+              <StatusBar onClickGoToLine={() => setFindMode('goto')} />
             </div>
-          </>
+          </div>
+        ) : section === 'settings' ? (
+          <SettingsView onNotice={showNotice} />
         ) : (
           <ModulePlaceholder section={section} onBackToNotes={() => setSection('notes')} />
         )}
-      </main>
+      </div>
 
-      <StatusBar onClickGoToLine={() => setFindMode('goto')} />
-      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} onSelectHit={handleSelectSearchHit} />
+      <SearchModal
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelectHit={handleSelectSearchHit}
+      />
+      <CloseReasonModal
+        target={closeTarget}
+        onCancel={() => setCloseTarget(null)}
+        onConfirm={handleConfirmClose}
+      />
+      <ClosedHistoryModal
+        open={closedHistoryOpen}
+        onClose={() => setClosedHistoryOpen(false)}
+        onNotice={showNotice}
+      />
       <div className={`toast ${notice ? 'show' : ''}`}>{notice}</div>
     </div>
   );

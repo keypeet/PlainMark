@@ -61,6 +61,7 @@ function activeFields(tabs: TabDocument[], activeTabId: string) {
     file: { path: active.notePath, name: active.title.endsWith('.md') ? active.title : `${active.title}.md` } as FileRecord,
     notePath: active.notePath,
     projectSlug: active.projectSlug,
+    scratchId: active.scratchId ?? null,
     dirty: active.dirty,
     cursor: active.cursor,
     lineEnding: active.lineEnding,
@@ -76,6 +77,7 @@ interface DocState {
   file: FileRecord;
   notePath: string | null;
   projectSlug: string | null;
+  scratchId: string | null;
   dirty: boolean;
   cursor: CursorPosition;
   lineEnding: LineEnding;
@@ -92,6 +94,7 @@ interface DocState {
 
   openNoteTab: (note: { path: string; name: string; projectSlug: string }, content: string) => void;
   openScratchTab: (title?: string, content?: string) => void;
+  openPersistedScratchTab: (scratch: { id: string; title: string; content: string }) => void;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
@@ -199,6 +202,34 @@ export const useDocStore = create<DocState>((set, get) => ({
     const { tabs } = get();
     const fresh = makeScratchTab(title.replace(/\.md$/i, '') || 'Untitled', content);
     set(activeFields([...tabs, fresh], fresh.id));
+  },
+
+  openPersistedScratchTab: (scratch) => {
+    const { tabs, activeTabId } = get();
+    const existing = tabs.find((tab) => tab.scratchId === scratch.id);
+    if (existing) {
+      set(activeFields(tabs, existing.id));
+      return;
+    }
+    const normalized = normalizeNewlines(scratch.content);
+    const active = tabs.find((t) => t.id === activeTabId);
+    const canReuse = active && !active.notePath && !active.scratchId && !active.dirty && active.content.length === 0;
+    const nextTab: TabDocument = {
+      id: canReuse ? active.id : nextTabId(),
+      title: scratch.title,
+      notePath: null,
+      projectSlug: null,
+      scratchId: scratch.id,
+      content: normalized,
+      lastSavedContent: normalized,
+      dirty: false,
+      lineEnding: detectLineEnding(scratch.content),
+      cursor: { line: 1, column: 1 }
+    };
+    const nextTabs = canReuse
+      ? tabs.map((t) => (t.id === active.id ? nextTab : t))
+      : [...tabs, nextTab];
+    set(activeFields(nextTabs, nextTab.id));
   },
 
   setActiveTab: (tabId) => {

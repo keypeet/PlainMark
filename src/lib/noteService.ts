@@ -100,7 +100,13 @@ export async function createProject(name: string, repoPath?: string | null): Pro
 
 export async function updateProject(
   slug: string,
-  patch: { name?: string; repoPath?: string | null; glossary?: string[] }
+  patch: {
+    name?: string;
+    repoPath?: string | null;
+    glossary?: string[];
+    hidden?: boolean;
+    defaultVisibility?: 'local_only' | 'shareable';
+  }
 ): Promise<ProjectMeta> {
   await flushNoteWrites();
   return apiUpdateProject(slug, patch);

@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, CornerDownLeft, Replace, X } from 'lucide-react';
-import { RefObject, useEffect, useRef, useState } from 'react';
+import { RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { useDocStore } from '../store/docStore';
 import type { EditorApi, SearchStats } from '../types';
 
 export type FindBarMode = 'find' | 'replace' | 'goto' | null;
@@ -13,6 +14,7 @@ interface FindReplaceBarProps {
 }
 
 export function FindReplaceBar({ mode, editorRef, onClose, onModeChange, onNotice }: FindReplaceBarProps) {
+  const content = useDocStore((s) => s.content);
   const [query, setQuery] = useState('');
   const [replacement, setReplacement] = useState('');
   const [matchCase, setMatchCase] = useState(false);
@@ -44,6 +46,22 @@ export function FindReplaceBar({ mode, editorRef, onClose, onModeChange, onNotic
     setStats(next);
   }, [query, matchCase, mode, editorRef]);
 
+  const matchingLines = useMemo(() => {
+    const q = query.trim();
+    if (!q || (mode !== 'find' && mode !== 'replace')) return [];
+    const needle = matchCase ? q : q.toLowerCase();
+    const lines = content.split(/\r?\n/);
+    const hits: Array<{ line: number; text: string }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const hay = matchCase ? lines[i] : lines[i].toLowerCase();
+      if (hay.includes(needle)) {
+        hits.push({ line: i + 1, text: lines[i].trim() || '(บรรทัดว่าง)' });
+        if (hits.length >= 100) break;
+      }
+    }
+    return hits;
+  }, [content, query, matchCase, mode]);
+
   if (!mode) return null;
 
   const handleClose = () => {
@@ -63,30 +81,46 @@ export function FindReplaceBar({ mode, editorRef, onClose, onModeChange, onNotic
       }
     };
     return (
-      <form className="find-bar goto-bar" onSubmit={submitGoto}>
-        <span className="find-label">ไปที่บรรทัด</span>
-        <input
-          ref={gotoInputRef}
-          type="number"
-          min={1}
-          className="find-input"
-          placeholder="เลขบรรทัด…"
-          value={lineInput}
-          onChange={(e) => setLineInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Escape' && handleClose()}
-        />
-        <button type="submit" className="find-btn primary" title="กระโดด (Enter)">
-          <CornerDownLeft size={14} /> ไป
-        </button>
-        <button type="button" className="find-icon-btn" title="ปิด (Esc)" onClick={handleClose}>
-          <X size={14} />
-        </button>
-      </form>
+      <aside className="find-side-panel" aria-label="ไปที่บรรทัด">
+        <div className="find-side-head">
+          <span>ไปที่บรรทัด</span>
+          <button type="button" className="find-icon-btn" title="ปิด (Esc)" onClick={handleClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <form onSubmit={submitGoto} style={{ display: 'flex', gap: 6 }}>
+          <input
+            ref={gotoInputRef}
+            type="number"
+            min={1}
+            className="find-input"
+            style={{ flex: 1 }}
+            placeholder="เลขบรรทัด…"
+            value={lineInput}
+            onChange={(e) => setLineInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && handleClose()}
+          />
+          <button type="submit" className="find-btn primary" title="กระโดด (Enter)">
+            <CornerDownLeft size={14} /> ไป
+          </button>
+        </form>
+      </aside>
     );
   }
 
   return (
-    <div className="find-bar" onKeyDown={(e) => e.key === 'Escape' && handleClose()}>
+    <aside
+      className="find-side-panel"
+      aria-label="ค้นหาและแทนที่ในโน้ต"
+      onKeyDown={(e) => e.key === 'Escape' && handleClose()}
+    >
+      <div className="find-side-head">
+        <span>ค้นหาในโน้ต</span>
+        <button type="button" className="find-icon-btn" title="ปิด (Esc)" onClick={handleClose}>
+          <X size={14} />
+        </button>
+      </div>
+
       <div className="find-row">
         <input
           ref={findInputRef}
@@ -102,7 +136,10 @@ export function FindReplaceBar({ mode, editorRef, onClose, onModeChange, onNotic
             }
           }}
         />
-        <span className="find-count">{query ? `${stats.current} / ${stats.total}` : ''}</span>
+      </div>
+
+      <div className="find-row">
+        <span className="find-count">{query ? `${stats.current} / ${stats.total}` : '0 จุด'}</span>
         <button
           type="button"
           className={`find-icon-btn ${matchCase ? 'active' : ''}`}
@@ -141,49 +178,66 @@ export function FindReplaceBar({ mode, editorRef, onClose, onModeChange, onNotic
         >
           <Replace size={14} />
         </button>
-        <button type="button" className="find-icon-btn" title="ปิด (Esc)" onClick={handleClose}>
-          <X size={14} />
-        </button>
       </div>
 
       {mode === 'replace' && (
-        <div className="find-row">
-          <input
-            className="find-input"
-            placeholder="แทนที่ด้วย…"
-            value={replacement}
-            onChange={(e) => setReplacement(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
+        <>
+          <div className="find-row">
+            <input
+              className="find-input"
+              placeholder="แทนที่ด้วย…"
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const next = editorRef.current?.replaceCurrent(replacement);
+                  if (next) setStats(next);
+                }
+              }}
+            />
+          </div>
+          <div className="find-row">
+            <button
+              type="button"
+              className="find-btn"
+              onClick={() => {
                 const next = editorRef.current?.replaceCurrent(replacement);
                 if (next) setStats(next);
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="find-btn"
-            onClick={() => {
-              const next = editorRef.current?.replaceCurrent(replacement);
-              if (next) setStats(next);
-            }}
-          >
-            แทนที่
-          </button>
-          <button
-            type="button"
-            className="find-btn"
-            onClick={() => {
-              const count = editorRef.current?.replaceAll(replacement) ?? 0;
-              setStats({ total: 0, current: 0 });
-              onNotice(`แทนที่แล้ว ${count} จุด`);
-            }}
-          >
-            ทั้งหมด
-          </button>
+              }}
+            >
+              แทนที่
+            </button>
+            <button
+              type="button"
+              className="find-btn"
+              onClick={() => {
+                const count = editorRef.current?.replaceAll(replacement) ?? 0;
+                setStats({ total: 0, current: 0 });
+                onNotice(`แทนที่แล้ว ${count} จุด`);
+              }}
+            >
+              ทั้งหมด
+            </button>
+          </div>
+        </>
+      )}
+
+      {query.trim() && (
+        <div className="find-matches-list">
+          {matchingLines.map((hit) => (
+            <button
+              key={hit.line}
+              type="button"
+              className="find-match-row"
+              onClick={() => editorRef.current?.goToLine(hit.line)}
+            >
+              <span className="find-match-line">L{hit.line}</span>
+              <span className="find-match-text">{hit.text}</span>
+            </button>
+          ))}
         </div>
       )}
-    </div>
+    </aside>
   );
 }

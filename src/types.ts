@@ -1,8 +1,14 @@
 export type ViewMode = 'formatted' | 'syntax';
 
-export type AppSection = 'notes' | 'meetings' | 'knowledge' | 'insights';
+export type AppSection = 'insights' | 'notes' | 'meetings' | 'knowledge' | 'settings';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+
+export type AccentId = 'indigo' | 'teal' | 'forest' | 'amber' | 'rose' | 'plum' | 'slate' | 'ocean';
+
+export type FontId = 'ibm-plex' | 'sarabun' | 'noto-sans' | 'noto-serif';
+
+export type EditorWidthPreset = 'narrow' | 'wide' | 'full';
 
 export type LineEnding = 'LF' | 'CRLF';
 
@@ -21,6 +27,8 @@ export interface TabDocument {
   title: string;
   notePath: string | null;
   projectSlug: string | null;
+  scratchId?: string | null;
+  scope?: string | null;
   content: string;
   lastSavedContent: string;
   dirty: boolean;

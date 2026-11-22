@@ -4,6 +4,7 @@ import 'highlight.js/styles/github.css';
 import './styles/theme.css';
 import './styles/preview.css';
 import './styles/app.css';
+import './styles/v5.css';
 import App from './App';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

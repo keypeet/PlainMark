@@ -34,7 +34,7 @@ export function TabBar({ onNewTab, onOpenExternal, onSaveAll, onExport }: TabBar
               key={tab.id}
               role="tab"
               aria-selected={active}
-              className={`tab-item ${active ? 'active' : ''}`}
+              className={`tab-item ${active ? 'active' : ''} ${tab.scratchId ? 'is-scratch' : ''}`}
               title={tab.projectSlug ? `${tab.projectSlug} / ${tab.title}` : tab.title}
               onClick={() => setActiveTab(tab.id)}
               onAuxClick={(e) => {
