@@ -189,7 +189,8 @@ export interface MeetingKeyframe {
   imageUrl?: string;
   caption?: string;
   ocrText?: string;
-  ocrStatus?: 'pending' | 'done';
+  ocrStatus?: 'pending' | 'done' | 'failed' | 'unavailable';
+  ocrError?: string;
   region?: { x: number; y: number; w: number; h: number };
 }
 
@@ -739,6 +740,13 @@ export function apiDeleteMeetingKeyframe(
   return requestJson(
     `/api/meetings/${encodeURIComponent(meetingId)}/keyframes/${encodeURIComponent(keyframeId)}`,
     { method: 'DELETE' }
+  );
+}
+
+export function apiRerunKeyframeOcr(meetingId: string, keyframeId: string): Promise<MeetingRecord> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/keyframes/${encodeURIComponent(keyframeId)}/ocr`,
+    { method: 'POST' }
   );
 }
 

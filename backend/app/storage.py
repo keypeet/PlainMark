@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import db, privacy
+from . import db, ocr, privacy
 
 NOTE_EXT = ".md"
 HISTORY_DIR = ".history"
@@ -1134,6 +1134,11 @@ class WorkspaceStorage:
                                 str(rec.get("title", "")),
                                 str(rec.get("summary", "")),
                                 str(rec.get("date", "")),
+                                *(
+                                    str(k.get("ocrText", ""))
+                                    for k in (rec.get("keyframes") or [])
+                                    if isinstance(k, dict)
+                                ),
                             ]
                         ).lower()
                         if query_lower not in haystack:
@@ -1361,7 +1366,39 @@ class WorkspaceStorage:
             meta["keyframes"] = frames
             meta["updatedAt"] = _now_ms()
             _atomic_write_json(mdir / "meeting.json", meta)
-            return self.get_meeting(meeting_id)
+        if kind == "ocr":
+            return self.run_keyframe_ocr(meeting_id, keyframe["id"])
+        return self.get_meeting(meeting_id)
+
+    def run_keyframe_ocr(self, meeting_id: str, keyframe_id: str) -> dict:
+        """Read a capture with OpenThai OCR and store the text on its keyframe."""
+        image = self.resolve_meeting_capture(meeting_id, f"{keyframe_id}.png")
+        # OCR runs outside the lock (~1 s) so other writes are not held up.
+        try:
+            text, status, error = ocr.read_png(image.read_bytes()), "done", ""
+        except ocr.OcrUnavailable as exc:
+            text, status, error = "", "unavailable", str(exc)
+        except (ValueError, RuntimeError, OSError) as exc:
+            text, status, error = "", "failed", str(exc)
+        with self._op_lock:
+            scope, mdir = self._find_meeting_dir(meeting_id)
+            meta = self._load_meeting_summary_record(scope, mdir)
+            if not meta:
+                raise FileNotFoundError(meeting_id)
+            frames = [k for k in (meta.get("keyframes") or []) if isinstance(k, dict)]
+            target = next((k for k in frames if k.get("id") == keyframe_id), None)
+            if target is None:
+                raise FileNotFoundError(keyframe_id)
+            target["ocrText"] = text
+            target["ocrStatus"] = status
+            if error:
+                target["ocrError"] = error
+            else:
+                target.pop("ocrError", None)
+            meta["keyframes"] = frames
+            meta["updatedAt"] = _now_ms()
+            _atomic_write_json(mdir / "meeting.json", meta)
+        return self.get_meeting(meeting_id)
 
     def resolve_meeting_capture(self, meeting_id: str, name: str) -> Path:
         if not CAPTURE_NAME_RE.match(name or ""):

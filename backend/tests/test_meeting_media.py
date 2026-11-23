@@ -60,7 +60,10 @@ def test_meeting_links_video_in_place(tmp_path: Path) -> None:
     assert client.patch(f"/api/meetings/{mid}", json={"videoPath": ""}).json()["videoPath"] == ""
 
 
-def test_captures_become_sorted_keyframes_and_can_be_deleted(tmp_path: Path) -> None:
+def test_captures_become_sorted_keyframes_and_can_be_deleted(tmp_path: Path, monkeypatch) -> None:
+    from app import ocr as ocr_module
+
+    monkeypatch.setattr(ocr_module, "read_png", lambda data: "")
     client, _, mid = setup(tmp_path)
 
     later = client.post(
@@ -78,7 +81,7 @@ def test_captures_become_sorted_keyframes_and_can_be_deleted(tmp_path: Path) -> 
     frames = ocr["keyframes"]
     assert [f["timestamp"] for f in frames] == ["01:05", "1:02:05"]
     assert frames[0]["kind"] == "ocr"
-    assert frames[0]["ocrStatus"] == "pending"
+    assert frames[0]["ocrStatus"] == "done"
     assert frames[0]["region"] == {"x": 10, "y": 20, "w": 300, "h": 80}
 
     image = client.get(frames[1]["imageUrl"])
@@ -96,3 +99,68 @@ def test_captures_become_sorted_keyframes_and_can_be_deleted(tmp_path: Path) -> 
     after = client.delete(f"/api/meetings/{mid}/keyframes/{frames[1]['id']}").json()
     assert [f["id"] for f in after["keyframes"]] == [frames[0]["id"]]
     assert client.get(frames[1]["imageUrl"]).status_code == 404
+
+
+def test_region_capture_is_read_by_ocr_and_searchable(tmp_path: Path, monkeypatch) -> None:
+    from app import ocr
+
+    monkeypatch.setattr(ocr, "read_png", lambda data: "Executive Summary\nใช้ AI 73%")
+    client, _, mid = setup(tmp_path)
+
+    res = client.post(
+        f"/api/meetings/{mid}/captures",
+        files={"file": ("a.png", PNG_BYTES, "image/png")},
+        data={"timeSec": "65", "kind": "ocr"},
+    ).json()
+    frame = res["keyframes"][0]
+    assert frame["ocrStatus"] == "done"
+    assert frame["ocrText"] == "Executive Summary\nใช้ AI 73%"
+
+    found = client.get("/api/meetings", params={"q": "executive summary"}).json()
+    assert [m["id"] for m in found["items"]] == [mid]
+
+    plain = client.post(
+        f"/api/meetings/{mid}/captures",
+        files={"file": ("b.png", PNG_BYTES, "image/png")},
+        data={"timeSec": "70", "kind": "frame"},
+    ).json()
+    assert "ocrStatus" not in plain["keyframes"][1]
+
+
+def test_missing_ocr_model_is_reported_and_can_be_retried(tmp_path: Path, monkeypatch) -> None:
+    from app import ocr
+
+    def unavailable(data: bytes) -> str:
+        raise ocr.OcrUnavailable("OCR model not installed")
+
+    monkeypatch.setattr(ocr, "read_png", unavailable)
+    client, _, mid = setup(tmp_path)
+    frame = client.post(
+        f"/api/meetings/{mid}/captures",
+        files={"file": ("a.png", PNG_BYTES, "image/png")},
+        data={"timeSec": "5", "kind": "ocr"},
+    ).json()["keyframes"][0]
+    assert frame["ocrStatus"] == "unavailable"
+    assert "not installed" in frame["ocrError"]
+
+    monkeypatch.setattr(ocr, "read_png", lambda data: "พร้อมแล้ว")
+    retried = client.post(f"/api/meetings/{mid}/keyframes/{frame['id']}/ocr").json()
+    assert retried["keyframes"][0]["ocrStatus"] == "done"
+    assert retried["keyframes"][0]["ocrText"] == "พร้อมแล้ว"
+    assert "ocrError" not in retried["keyframes"][0]
+    assert client.post(f"/api/meetings/{mid}/keyframes/cap-1-abcdef/ocr").status_code == 404
+
+
+def test_ocr_install_refuses_files_with_wrong_checksum(tmp_path: Path) -> None:
+    import pytest
+
+    from app import ocr
+
+    source = tmp_path / "src"
+    for name in ocr.MODEL_FILES:
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_bytes(b"not the real file")
+    target = tmp_path / "model"
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        ocr.install(target, source)
+    assert not ocr.model_ready(target)

@@ -16,6 +16,16 @@ def default_data_root() -> Path:
     return (Path.home() / "PlainMarkData").resolve()
 
 
+def ocr_model_dir() -> Path:
+    """OpenThai OCR model + runtime, kept outside the repo (installed by `python -m app.ocr`)."""
+    env_dir = os.environ.get("PLAINMARK_OCR_MODEL_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    base = os.environ.get("LOCALAPPDATA", "").strip()
+    root = Path(base) / "PlainMark" if base else Path.home() / ".plainmark"
+    return (root / "models" / "openthai-ocr-text").resolve()
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 

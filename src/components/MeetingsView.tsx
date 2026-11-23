@@ -40,6 +40,7 @@ import {
   apiListMeetings,
   apiListVoiceprints,
   apiRenameMeetingSpeaker,
+  apiRerunKeyframeOcr,
   apiUpdateMeeting,
   apiUpdateMeetingTranscript,
   type ContactItem,
@@ -61,6 +62,19 @@ interface MeetingsViewProps {
 }
 
 const PAGE_SIZE = 20;
+
+export function ocrBadge(kf: MeetingKeyframe): { label: string; tone: 'inbox' | 'local' | 'shareable' } {
+  switch (kf.ocrStatus) {
+    case 'done':
+      return kf.ocrText ? { label: 'อ่านแล้ว', tone: 'shareable' } : { label: 'ไม่พบข้อความ', tone: 'local' };
+    case 'unavailable':
+      return { label: 'ยังไม่ได้ติดตั้งตัวอ่าน', tone: 'inbox' };
+    case 'failed':
+      return { label: 'อ่านไม่สำเร็จ', tone: 'inbox' };
+    default:
+      return { label: 'รออ่านข้อความ', tone: 'inbox' };
+  }
+}
 
 export function MeetingsView({ onNotice }: MeetingsViewProps) {
   const { activeScope, projects } = useNotesStore();
@@ -467,8 +481,13 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
                   <span className="muted" style={{ fontSize: 11.5 }}>
                     {kf.timestamp || `#${idx + 1}`} {kf.caption ? `· ${kf.caption}` : ''}
                   </span>
-                  {kf.kind === 'ocr' && !kf.ocrText && (
-                    <span className="meeting-badge inbox">รออ่านข้อความ</span>
+                  {kf.kind === 'ocr' && (
+                    <span
+                      className={`meeting-badge ${ocrBadge(kf).tone}`}
+                      title={kf.ocrError || undefined}
+                    >
+                      {ocrBadge(kf).label}
+                    </span>
                   )}
                 </div>
                 {kf.imageUrl && (
@@ -482,6 +501,21 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
                         onClick={() => seekVideo(kf.timeSec ?? 0)}
                       >
                         <Play size={16} />
+                      </button>
+                    )}
+                    {kf.kind === 'ocr' && kf.id && (kf.ocrStatus !== 'done' || !kf.ocrText) && (
+                      <button
+                        type="button"
+                        className="note-mini-icon-btn"
+                        aria-label="อ่านข้อความอีกครั้ง"
+                        title="อ่านข้อความอีกครั้ง"
+                        onClick={() => {
+                          void apiRerunKeyframeOcr(selectedMeeting.id, kf.id || '')
+                            .then(setSelectedMeeting)
+                            .catch(() => onNotice('อ่านข้อความไม่สำเร็จ'));
+                        }}
+                      >
+                        <RefreshCw size={16} />
                       </button>
                     )}
                     <button
@@ -786,7 +820,24 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
               </div>
               {lightboxSlide.ocrText && (
                 <div className="meetings-history-box">
-                  <strong>OCR Text:</strong> {lightboxSlide.ocrText}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <strong>ข้อความที่อ่านได้</strong>
+                    <button
+                      type="button"
+                      className="note-mini-icon-btn"
+                      aria-label="คัดลอกข้อความ"
+                      title="คัดลอกข้อความ"
+                      onClick={() => {
+                        void navigator.clipboard
+                          .writeText(lightboxSlide.ocrText || '')
+                          .then(() => onNotice('คัดลอกข้อความแล้ว'))
+                          .catch(() => onNotice('คัดลอกข้อความไม่สำเร็จ'));
+                      }}
+                    >
+                      <Copy size={16} />
+                    </button>
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{lightboxSlide.ocrText}</div>
                 </div>
               )}
             </div>

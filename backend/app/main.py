@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import backup, config, wordseg
+from . import backup, config, ocr, wordseg
 from .storage import WorkspaceStorage
 
 
@@ -160,6 +160,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "wordsegEngine": wordseg.active_engine(),
             "legacyNotesAvailable": legacy_dir.is_dir(),
             "legacyNotesPath": str(legacy_dir),
+            "ocrModelReady": ocr.model_ready(),
             "modules": {
                 "notes": "ready",
                 "scratches": "ready",
@@ -580,6 +581,15 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FileResponse(path, media_type="image/png")
+
+    @app.post("/api/meetings/{meeting_id}/keyframes/{keyframe_id}/ocr")
+    def rerun_keyframe_ocr(meeting_id: str, keyframe_id: str) -> dict:
+        try:
+            return storage.run_keyframe_ocr(meeting_id, keyframe_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Keyframe not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.delete("/api/meetings/{meeting_id}/keyframes/{keyframe_id}")
     def delete_meeting_keyframe(meeting_id: str, keyframe_id: str) -> dict:

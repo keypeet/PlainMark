@@ -199,8 +199,15 @@ export function MeetingCapturePanel({
         crop ? native : undefined
       );
       onMeetingChange(updated);
+      const added = updated.keyframes?.find((k) => !meeting.keyframes?.some((o) => o.id === k.id));
       onNotice(
-        kind === 'ocr' ? 'เก็บกรอบไว้ในสไลด์ของประชุมแล้ว รออ่านข้อความ' : 'เก็บภาพไว้ในสไลด์ของประชุมแล้ว'
+        kind === 'frame'
+          ? 'เก็บภาพไว้ในสไลด์ของประชุมแล้ว'
+          : added?.ocrStatus === 'done'
+            ? added.ocrText
+              ? 'อ่านข้อความจากกรอบแล้ว ดูได้ในสไลด์ของประชุม'
+              : 'เก็บกรอบแล้ว แต่ไม่พบข้อความในกรอบนี้'
+            : 'เก็บกรอบแล้ว แต่ยังอ่านข้อความไม่ได้ กดอ่านอีกครั้งที่การ์ดสไลด์'
       );
     } catch {
       onNotice('บันทึกภาพไม่สำเร็จ');

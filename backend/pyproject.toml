@@ -11,6 +11,8 @@ dependencies = [
     "onnxruntime>=1.20",
     "pythainlp>=5.0",
     "openthai2-0-latte-wordseg-lite @ https://huggingface.co/iapp/OpenThai2.0-LATTE-WordSeg-Lite/resolve/main/openthai2_0_latte_wordseg_lite-0.1.2-py3-none-any.whl",
+    "opencv-python-headless>=4.8",
+    "pyclipper>=1.3",
 ]
 
 [dependency-groups]
