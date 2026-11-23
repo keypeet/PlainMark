@@ -46,6 +46,7 @@ import {
   type VoiceprintItem
 } from '../lib/api';
 import { useNotesStore } from '../store/notesStore';
+import { MeetingCapturePanel } from './MeetingCapturePanel';
 
 interface MeetingsViewProps {
   onNotice: (msg: string) => void;
@@ -81,6 +82,7 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   const [renameSpeakerId, setRenameSpeakerId] = useState<string | null>(null);
   const [renameSpeakerValue, setRenameSpeakerValue] = useState('');
   const [inlineFeedback, setInlineFeedback] = useState('');
+  const [videoOpen, setVideoOpen] = useState(false);
 
   // Modals
   const [createOpen, setCreateOpen] = useState(false);
@@ -406,8 +408,15 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
           </div>
         )}
 
-        {/* Audio-Only vs Keyframes 16:9 Strip */}
-        {!hasSlides ? (
+        <MeetingCapturePanel
+          key={selectedMeeting.id}
+          meetingTitle={selectedMeeting.title}
+          onNotice={onNotice}
+          onVideoOpenChange={setVideoOpen}
+        />
+
+        {/* Audio-Only vs Keyframes 16:9 Strip (an open video plays its own audio) */}
+        {!hasSlides && videoOpen ? null : !hasSlides ? (
           <div className="meetings-audio-bar" data-testid="audio-only-player">
             <Volume2 size={16} />
             <div style={{ flex: 1 }}>

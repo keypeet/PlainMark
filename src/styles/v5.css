@@ -1842,6 +1842,109 @@ body {
   object-fit: cover;
 }
 
+/* ---------- Meeting video capture (frame grab + OCR region) ---------- */
+.meeting-capture-panel {
+  max-width: 1120px;
+  margin: 0 auto 12px;
+  padding: 10px 15px;
+  border-radius: var(--r);
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meeting-capture-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meeting-capture-filename {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meeting-capture-stage {
+  position: relative;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: #000;
+}
+
+.meeting-capture-stage video {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+}
+
+.meeting-capture-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.meeting-capture-region {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.meeting-capture-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12.5px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.meeting-capture-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meeting-capture-toolbar .v5-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.meeting-capture-tray {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+
+.meeting-capture-tray .keyframe-thumb-card {
+  cursor: default;
+}
+
+.meeting-capture-tray button.keyframe-16x9 {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* OCR crops are often wide strips: show the whole crop, never cover-crop it */
+.meeting-capture-tray .keyframe-16x9 img {
+  object-fit: contain;
+}
+
 .meetings-detail-split {
   max-width: 1120px;
   margin: 0 auto;
