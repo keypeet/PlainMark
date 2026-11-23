@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
+  Download,
   Edit3,
   History,
   Image as ImageIcon,
@@ -13,6 +15,7 @@ import {
   Mic,
   PanelRightClose,
   PanelRightOpen,
+  Play,
   Plus,
   RefreshCw,
   Search,
@@ -29,6 +32,7 @@ import {
   apiCreateMeeting,
   apiCreateVoiceprint,
   apiDeleteMeeting,
+  apiDeleteMeetingKeyframe,
   apiDeleteVoiceprint,
   apiGetMeeting,
   apiListContacts,
@@ -46,7 +50,11 @@ import {
   type VoiceprintItem
 } from '../lib/api';
 import { useNotesStore } from '../store/notesStore';
-import { MeetingCapturePanel } from './MeetingCapturePanel';
+import {
+  captureFileName,
+  copyImageToClipboard,
+  MeetingCapturePanel
+} from './MeetingCapturePanel';
 
 interface MeetingsViewProps {
   onNotice: (msg: string) => void;
@@ -82,7 +90,7 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   const [renameSpeakerId, setRenameSpeakerId] = useState<string | null>(null);
   const [renameSpeakerValue, setRenameSpeakerValue] = useState('');
   const [inlineFeedback, setInlineFeedback] = useState('');
-  const [videoOpen, setVideoOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Modals
   const [createOpen, setCreateOpen] = useState(false);
@@ -265,6 +273,13 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   if (selectedMeeting) {
     const keyframes = selectedMeeting.keyframes || [];
     const hasSlides = keyframes.length > 0;
+    const hasVideo = !!selectedMeeting.videoPath;
+    const seekVideo = (sec: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.currentTime = sec;
+      video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
     const isInbox = selectedMeeting.bucket === 'inbox';
 
     return (
@@ -410,13 +425,14 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
 
         <MeetingCapturePanel
           key={selectedMeeting.id}
-          meetingTitle={selectedMeeting.title}
+          meeting={selectedMeeting}
+          videoRef={videoRef}
+          onMeetingChange={setSelectedMeeting}
           onNotice={onNotice}
-          onVideoOpenChange={setVideoOpen}
         />
 
-        {/* Audio-Only vs Keyframes 16:9 Strip (an open video plays its own audio) */}
-        {!hasSlides && videoOpen ? null : !hasSlides ? (
+        {/* Audio-Only vs Keyframes 16:9 Strip (a linked video plays its own audio) */}
+        {!hasSlides && hasVideo ? null : !hasSlides ? (
           <div className="meetings-audio-bar" data-testid="audio-only-player">
             <Volume2 size={16} />
             <div style={{ flex: 1 }}>
@@ -434,23 +450,80 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
         ) : (
           <div className="meetings-keyframes-strip" data-testid="keyframes-strip">
             {keyframes.map((kf, idx) => (
-              <button
-                key={kf.id || idx}
-                type="button"
-                className="keyframe-thumb-card"
-                onClick={() => setLightboxSlide(kf)}
-              >
-                <div className="keyframe-16x9">
+              <div key={kf.id || idx} className="keyframe-thumb-card">
+                <button
+                  type="button"
+                  className="keyframe-16x9"
+                  title="ดูภาพขนาดใหญ่"
+                  onClick={() => setLightboxSlide(kf)}
+                >
                   {kf.imageUrl ? (
                     <img src={kf.imageUrl} alt={kf.caption || `สไลด์ ${idx + 1}`} />
                   ) : (
                     <ImageIcon size={20} />
                   )}
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span className="muted" style={{ fontSize: 11.5 }}>
+                    {kf.timestamp || `#${idx + 1}`} {kf.caption ? `· ${kf.caption}` : ''}
+                  </span>
+                  {kf.kind === 'ocr' && !kf.ocrText && (
+                    <span className="meeting-badge inbox">รออ่านข้อความ</span>
+                  )}
                 </div>
-                <span className="muted" style={{ fontSize: 11.5 }}>
-                  {kf.timestamp || `#${idx + 1}`} {kf.caption ? `· ${kf.caption}` : ''}
-                </span>
-              </button>
+                {kf.imageUrl && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+                    {hasVideo && typeof kf.timeSec === 'number' && (
+                      <button
+                        type="button"
+                        className="note-mini-icon-btn"
+                        aria-label="ไปยังจังหวะนี้ในวิดีโอ"
+                        title="ไปยังจังหวะนี้ในวิดีโอ"
+                        onClick={() => seekVideo(kf.timeSec ?? 0)}
+                      >
+                        <Play size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="note-mini-icon-btn"
+                      aria-label="คัดลอกรูป"
+                      title="คัดลอกรูป"
+                      onClick={() => {
+                        void copyImageToClipboard(kf.imageUrl || '')
+                          .then(() => onNotice('คัดลอกรูปแล้ว วางในแอปอื่นได้เลย'))
+                          .catch(() => onNotice('คัดลอกรูปไม่สำเร็จ ลองกดดาวน์โหลดแทน'));
+                      }}
+                    >
+                      <Copy size={16} />
+                    </button>
+                    <a
+                      className="note-mini-icon-btn"
+                      href={kf.imageUrl}
+                      download={captureFileName(selectedMeeting.title, kf)}
+                      aria-label="ดาวน์โหลดรูป"
+                      title="ดาวน์โหลดรูป"
+                    >
+                      <Download size={16} />
+                    </a>
+                    {kf.id && (
+                      <button
+                        type="button"
+                        className="note-mini-icon-btn"
+                        aria-label="ลบรูปนี้"
+                        title="ลบรูปนี้"
+                        onClick={() => {
+                          void apiDeleteMeetingKeyframe(selectedMeeting.id, kf.id || '')
+                            .then(setSelectedMeeting)
+                            .catch(() => onNotice('ลบรูปไม่สำเร็จ'));
+                        }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}

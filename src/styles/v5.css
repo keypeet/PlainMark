@@ -1822,7 +1822,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  cursor: pointer;
   text-align: left;
 }
 
@@ -1836,10 +1835,17 @@ body {
   place-items: center;
 }
 
+button.keyframe-16x9 {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* contain, not cover: OCR crops are often wide strips and must show whole */
 .keyframe-16x9 img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 /* ---------- Meeting video capture (frame grab + OCR region) ---------- */
@@ -1922,27 +1928,6 @@ body {
 .meeting-capture-toolbar .v5-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.meeting-capture-tray {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 4px;
-}
-
-.meeting-capture-tray .keyframe-thumb-card {
-  cursor: default;
-}
-
-.meeting-capture-tray button.keyframe-16x9 {
-  padding: 0;
-  border: 0;
-  cursor: pointer;
-}
-
-/* OCR crops are often wide strips: show the whole crop, never cover-crop it */
-.meeting-capture-tray .keyframe-16x9 img {
-  object-fit: contain;
 }
 
 .meetings-detail-split {

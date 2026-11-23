@@ -183,11 +183,22 @@ export interface MeetingSegment {
 
 export interface MeetingKeyframe {
   id?: string;
+  kind?: 'frame' | 'ocr';
   timestamp?: string;
   timeSec?: number;
   imageUrl?: string;
   caption?: string;
   ocrText?: string;
+  ocrStatus?: 'pending' | 'done';
+  region?: { x: number; y: number; w: number; h: number };
+}
+
+export interface MediaVideoItem {
+  path: string;
+  name: string;
+  folder: string;
+  size: number;
+  modifiedAt: number;
 }
 
 export interface MeetingParticipant {
@@ -225,6 +236,7 @@ export interface MeetingRecord {
   actionItems: MeetingActionItem[];
   keyframes?: MeetingKeyframe[];
   audioUrl?: string;
+  videoPath?: string;
   status?: string;
   errorState?: MeetingErrorState | null;
   provenance?: InsightsProvenance | null;
@@ -700,6 +712,42 @@ export function apiListMeetingHistory(
   meetingId: string
 ): Promise<{ snapshots: MeetingHistorySnapshot[] }> {
   return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}/history`);
+}
+
+export function apiAddMeetingCapture(
+  meetingId: string,
+  image: Blob,
+  timeSec: number,
+  kind: 'frame' | 'ocr',
+  region?: { x: number; y: number; w: number; h: number }
+): Promise<MeetingRecord> {
+  const form = new FormData();
+  form.append('file', image, 'capture.png');
+  form.append('timeSec', String(timeSec));
+  form.append('kind', kind);
+  if (region) form.append('region', JSON.stringify(region));
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}/captures`, {
+    method: 'POST',
+    body: form
+  });
+}
+
+export function apiDeleteMeetingKeyframe(
+  meetingId: string,
+  keyframeId: string
+): Promise<MeetingRecord> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/keyframes/${encodeURIComponent(keyframeId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export function apiListMediaVideos(): Promise<{ root: string; items: MediaVideoItem[] }> {
+  return requestJson('/api/media/videos');
+}
+
+export function mediaFileUrl(path: string): string {
+  return `/api/media/file?path=${encodeURIComponent(path)}`;
 }
 
 export function apiListKnowledge(

@@ -509,6 +509,10 @@ export function SettingsView({ onNotice }: SettingsViewProps) {
 
             <div className="settings-card">
               <h3>ตัวเฝ้าไฟล์อัดหน้าจอ (OBS / Watch Folder สำหรับ Plan 2.5)</h3>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                วิดีโอที่ผูกกับประชุมต้องอยู่ในโฟลเดอร์นี้ (เว้นว่าง = โฟลเดอร์ Videos ของเครื่อง)
+                แอปเปิดไฟล์จากที่เดิม ไม่คัดลอกไฟล์
+              </p>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
                 <input
                   type="checkbox"

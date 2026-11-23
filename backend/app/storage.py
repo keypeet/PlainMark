@@ -29,6 +29,12 @@ MEETINGS_SUBDIR = "meetings"
 KNOWLEDGE_SUBDIR = "knowledge"
 VOICEPRINTS_SUBDIR = "voiceprints"
 RESERVED_MEETING_DIRS = {"inbox", "broken"}
+CAPTURES_SUBDIR = "captures"
+VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
+MEDIA_LIST_LIMIT = 300
+PNG_SIGNATURE = b"\x89PNG"
+MEDIA_LIST_MAX_DEPTH = 2
+CAPTURE_NAME_RE = re.compile(r"^cap-[0-9]+-[0-9a-f]{6}\.png$")
 DEFAULT_PROJECT_SLUG = "Inbox"
 PROMPT_VERSION = "v1.5a"
 
@@ -1204,6 +1210,7 @@ class WorkspaceStorage:
                 "actionItems": list(payload.get("actionItems") or []),
                 "keyframes": list(payload.get("keyframes") or []),
                 "audioUrl": str(payload.get("audioUrl") or ""),
+                "videoPath": "",
                 "status": str(payload.get("status") or "ready"),
                 "errorState": payload.get("errorState"),
                 "provenance": payload.get("provenance"),
@@ -1248,6 +1255,12 @@ class WorkspaceStorage:
                     meta[key] = patch[key]
             if "visibility" in patch and patch["visibility"] is not None:
                 meta["visibility"] = privacy.normalize_visibility(patch["visibility"])
+            if "videoPath" in patch and patch["videoPath"] is not None:
+                raw = str(patch["videoPath"]).strip()
+                try:
+                    meta["videoPath"] = str(self.resolve_media_file(raw)) if raw else ""
+                except FileNotFoundError as exc:
+                    raise ValueError("Video file not found") from exc
             meta["updatedAt"] = _now_ms()
             _atomic_write_json(mdir / "meeting.json", meta)
             return self.get_meeting(meeting_id)
@@ -1256,6 +1269,126 @@ class WorkspaceStorage:
         with self._op_lock:
             _, mdir = self._find_meeting_dir(meeting_id)
             shutil.rmtree(mdir)
+
+    # ---------- Meeting media (videos stay in the recording folder, never copied) ----------
+
+    def media_root(self) -> Path:
+        watch = self.get_settings().get("meetingsWatch") or {}
+        raw = str(watch.get("watchPath") or "").strip() if isinstance(watch, dict) else ""
+        return Path(raw).expanduser().resolve() if raw else (Path.home() / "Videos").resolve()
+
+    def resolve_media_file(self, raw_path: str) -> Path:
+        if not raw_path:
+            raise ValueError("Empty media path")
+        candidate = Path(raw_path).expanduser().resolve()
+        try:
+            candidate.relative_to(self.media_root())
+        except ValueError as exc:
+            raise ValueError("Video is outside the recording folder") from exc
+        if candidate.suffix.lower() not in VIDEO_EXTS:
+            raise ValueError("Unsupported video type")
+        if not candidate.is_file():
+            raise FileNotFoundError(raw_path)
+        return candidate
+
+    def list_media_files(self) -> dict:
+        root = self.media_root()
+        items: list[dict] = []
+        if root.is_dir():
+            for dirpath, dirnames, filenames in os.walk(root):
+                depth = len(Path(dirpath).relative_to(root).parts)
+                if depth >= MEDIA_LIST_MAX_DEPTH:
+                    dirnames[:] = []
+                for name in filenames:
+                    path = Path(dirpath) / name
+                    if path.suffix.lower() not in VIDEO_EXTS:
+                        continue
+                    try:
+                        st = path.stat()
+                    except OSError:
+                        continue
+                    items.append(
+                        {
+                            "path": str(path),
+                            "name": name,
+                            "folder": "" if depth == 0 else str(Path(dirpath).relative_to(root)),
+                            "size": st.st_size,
+                            "modifiedAt": int(st.st_mtime * 1000),
+                        }
+                    )
+        items.sort(key=lambda i: i["modifiedAt"], reverse=True)
+        return {"root": str(root), "items": items[:MEDIA_LIST_LIMIT]}
+
+    def add_meeting_capture(
+        self,
+        meeting_id: str,
+        data: bytes,
+        time_sec: float,
+        kind: str,
+        region: dict | None = None,
+    ) -> dict:
+        if not data.startswith(PNG_SIGNATURE):
+            raise ValueError("Capture must be a PNG image")
+        kind = "ocr" if kind == "ocr" else "frame"
+        with self._op_lock:
+            scope, mdir = self._find_meeting_dir(meeting_id)
+            meta = self._load_meeting_summary_record(scope, mdir)
+            if not meta:
+                raise FileNotFoundError(meeting_id)
+            cap_dir = mdir / CAPTURES_SUBDIR
+            cap_dir.mkdir(parents=True, exist_ok=True)
+            name = f"cap-{_now_ms()}-{uuid.uuid4().hex[:6]}.png"
+            _atomic_write_bytes(cap_dir / name, data)
+            total = max(0, int(time_sec))
+            h, rem = divmod(total, 3600)
+            mm_ss = f"{rem // 60:02d}:{rem % 60:02d}"
+            stamp = f"{h}:{mm_ss}" if h else mm_ss
+            keyframe = {
+                "id": name[: -len(".png")],
+                "kind": kind,
+                "timeSec": round(max(0.0, float(time_sec)), 2),
+                "timestamp": stamp,
+                "imageUrl": f"/api/meetings/{meta['id']}/captures/{name}",
+                "ocrText": "",
+            }
+            if kind == "ocr":
+                keyframe["ocrStatus"] = "pending"
+                if region:
+                    keyframe["region"] = {k: int(region.get(k, 0)) for k in ("x", "y", "w", "h")}
+            frames = [k for k in (meta.get("keyframes") or []) if isinstance(k, dict)]
+            frames.append(keyframe)
+            frames.sort(key=lambda k: float(k.get("timeSec") or 0))
+            meta["keyframes"] = frames
+            meta["updatedAt"] = _now_ms()
+            _atomic_write_json(mdir / "meeting.json", meta)
+            return self.get_meeting(meeting_id)
+
+    def resolve_meeting_capture(self, meeting_id: str, name: str) -> Path:
+        if not CAPTURE_NAME_RE.match(name or ""):
+            raise ValueError("Invalid capture name")
+        _, mdir = self._find_meeting_dir(meeting_id)
+        path = mdir / CAPTURES_SUBDIR / name
+        if not path.is_file():
+            raise FileNotFoundError(name)
+        return path
+
+    def delete_meeting_keyframe(self, meeting_id: str, keyframe_id: str) -> dict:
+        with self._op_lock:
+            scope, mdir = self._find_meeting_dir(meeting_id)
+            meta = self._load_meeting_summary_record(scope, mdir)
+            if not meta:
+                raise FileNotFoundError(meeting_id)
+            frames = [k for k in (meta.get("keyframes") or []) if isinstance(k, dict)]
+            kept = [k for k in frames if k.get("id") != keyframe_id]
+            if len(kept) == len(frames):
+                raise FileNotFoundError(keyframe_id)
+            meta["keyframes"] = kept
+            meta["updatedAt"] = _now_ms()
+            _atomic_write_json(mdir / "meeting.json", meta)
+            image = mdir / CAPTURES_SUBDIR / f"{keyframe_id}.png"
+            if CAPTURE_NAME_RE.match(image.name) and image.is_file():
+                image.unlink()
+            return self.get_meeting(meeting_id)
 
     def move_meeting(self, meeting_id: str, target_scope: str) -> dict:
         with self._op_lock:

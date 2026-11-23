@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import mimetypes
 from pathlib import Path
 
@@ -546,6 +547,65 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Meeting not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/meetings/{meeting_id}/captures")
+    async def add_meeting_capture(
+        meeting_id: str,
+        file: UploadFile = File(...),
+        timeSec: float = Form(0.0),
+        kind: str = Form("frame"),
+        region: str = Form(""),
+    ) -> dict:
+        try:
+            region_obj = json.loads(region) if region else None
+            data = await file.read()
+            return storage.add_meeting_capture(
+                meeting_id,
+                data,
+                timeSec,
+                kind,
+                region_obj if isinstance(region_obj, dict) else None,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting not found") from exc
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/meetings/{meeting_id}/captures/{name}")
+    def get_meeting_capture(meeting_id: str, name: str) -> FileResponse:
+        try:
+            path = storage.resolve_meeting_capture(meeting_id, name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Capture not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(path, media_type="image/png")
+
+    @app.delete("/api/meetings/{meeting_id}/keyframes/{keyframe_id}")
+    def delete_meeting_keyframe(meeting_id: str, keyframe_id: str) -> dict:
+        try:
+            return storage.delete_meeting_keyframe(meeting_id, keyframe_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Keyframe not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # ---------- Meeting media (videos stay in the recording folder) ----------
+
+    @app.get("/api/media/videos")
+    def list_media_videos() -> dict:
+        return storage.list_media_files()
+
+    @app.get("/api/media/file")
+    def get_media_file(path: str = Query(..., min_length=1)) -> FileResponse:
+        try:
+            video = storage.resolve_media_file(path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Video not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        media_type = mimetypes.guess_type(video.name)[0] or "video/mp4"
+        return FileResponse(video, media_type=media_type)
 
     # ---------- Voiceprints & Contacts ----------
 
