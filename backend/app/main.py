@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import backup, config, ocr, wordseg
+from . import backup, config, diarize, ocr, wordseg
 from .storage import WorkspaceStorage
 
 
@@ -126,6 +126,11 @@ class TranscriptUpdateBody(BaseModel):
     reason: str = "edit"
 
 
+class DiarizeBody(BaseModel):
+    audioTrack: int = Field(default=1, ge=1)
+    micTrack: int | None = Field(default=None, ge=1)
+
+
 class RenameSpeakerBody(BaseModel):
     oldSpeakerId: str = Field(min_length=1)
     newName: str = Field(min_length=1)
@@ -161,6 +166,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "legacyNotesAvailable": legacy_dir.is_dir(),
             "legacyNotesPath": str(legacy_dir),
             "ocrModelReady": ocr.model_ready(),
+            "diarizeModelReady": diarize.model_ready(),
             "modules": {
                 "notes": "ready",
                 "scratches": "ready",
@@ -588,6 +594,26 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             return storage.run_keyframe_ocr(meeting_id, keyframe_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Keyframe not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/meetings/{meeting_id}/diarize")
+    def start_meeting_diarization(meeting_id: str, body: DiarizeBody | None = None) -> dict:
+        body = body or DiarizeBody()
+        mic = body.micTrack - 1 if body.micTrack else None
+        try:
+            return storage.start_meeting_diarization(meeting_id, body.audioTrack - 1, mic)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/meetings/{meeting_id}/diarization")
+    def get_meeting_diarization(meeting_id: str) -> dict:
+        try:
+            return storage.get_meeting_diarization(meeting_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -9,6 +9,7 @@ import mimetypes
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -16,7 +17,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import db, ocr, privacy
+from . import db, diarize, ocr, privacy
 
 NOTE_EXT = ".md"
 HISTORY_DIR = ".history"
@@ -30,6 +31,7 @@ KNOWLEDGE_SUBDIR = "knowledge"
 VOICEPRINTS_SUBDIR = "voiceprints"
 RESERVED_MEETING_DIRS = {"inbox", "broken"}
 CAPTURES_SUBDIR = "captures"
+DIARIZATION_FILE = "diarization.json"
 VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
 MEDIA_LIST_LIMIT = 300
 PNG_SIGNATURE = b"\x89PNG"
@@ -1399,6 +1401,70 @@ class WorkspaceStorage:
             meta["updatedAt"] = _now_ms()
             _atomic_write_json(mdir / "meeting.json", meta)
         return self.get_meeting(meeting_id)
+
+    # ---------- Speaker diarization (Nemotron 3, one background run at a time) ----------
+
+    def get_meeting_diarization(self, meeting_id: str) -> dict:
+        _, mdir = self._find_meeting_dir(meeting_id)
+        data = _read_json(mdir / DIARIZATION_FILE, None)
+        if not isinstance(data, dict):
+            return {"status": "none"}
+        if data.get("status") == "running" and not diarize.is_running(meeting_id):
+            return {"status": "failed", "error": "Interrupted: the app stopped while it ran"}
+        return data
+
+    def start_meeting_diarization(
+        self,
+        meeting_id: str,
+        audio_track: int = 0,
+        mic_track: int | None = None,
+        *,
+        background: bool = True,
+    ) -> dict:
+        """Find who spoke when in the linked video; the result lands in diarization.json."""
+        scope, mdir = self._find_meeting_dir(meeting_id)
+        meta = self._load_meeting_summary_record(scope, mdir)
+        if not meta:
+            raise FileNotFoundError(meeting_id)
+        raw = str(meta.get("videoPath") or "").strip()
+        if not raw:
+            raise ValueError("Link a video to this meeting first")
+        try:
+            video = self.resolve_media_file(raw)
+        except FileNotFoundError as exc:
+            raise ValueError("Video file not found") from exc
+        if not diarize.try_start(meeting_id):
+            raise ValueError("Another speaker diarization is already running")
+        with self._op_lock:
+            running = {"status": "running", "startedAt": _now_ms()}
+            _atomic_write_json(mdir / DIARIZATION_FILE, running)
+
+        def job() -> None:
+            try:
+                try:
+                    result = diarize.diarize_video(video, audio_track, mic_track)
+                except diarize.DiarizeUnavailable as exc:
+                    result = {"status": "unavailable", "error": str(exc)}
+                except subprocess.CalledProcessError as exc:
+                    detail = (exc.stderr or b"").decode("utf-8", "replace").strip()
+                    result = {"status": "failed", "error": detail or str(exc)}
+                except Exception as exc:  # a background run must always leave a final status
+                    result = {"status": "failed", "error": str(exc)}
+                result["finishedAt"] = _now_ms()
+                with self._op_lock:
+                    try:
+                        _, current = self._find_meeting_dir(meeting_id)
+                    except (FileNotFoundError, ValueError):
+                        return  # the meeting was deleted while it ran
+                    _atomic_write_json(current / DIARIZATION_FILE, result)
+            finally:
+                diarize.finish(meeting_id)
+
+        if background:
+            threading.Thread(target=job, name=f"diarize-{meeting_id}", daemon=True).start()
+        else:
+            job()
+        return self.get_meeting_diarization(meeting_id)
 
     def resolve_meeting_capture(self, meeting_id: str, name: str) -> Path:
         if not CAPTURE_NAME_RE.match(name or ""):

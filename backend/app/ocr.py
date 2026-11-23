@@ -104,24 +104,34 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def install(target: Path, source: Path | None = None) -> list[str]:
-    """Copy or download every pinned file into target; refuse any file whose hash differs."""
+def install(
+    target: Path,
+    source: Path | None = None,
+    *,
+    files: dict[str, str] = MODEL_FILES,
+    repo: str = MODEL_REPO,
+    revision: str = MODEL_REVISION,
+) -> list[str]:
+    """Copy or download every pinned file into target; refuse any file whose hash differs.
+
+    Other local models (app.diarize) reuse this with their own pinned files.
+    """
     target.mkdir(parents=True, exist_ok=True)
     installed: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
-        for name, expected in MODEL_FILES.items():
+        for name, expected in files.items():
             staged = Path(tmp) / name
             staged.parent.mkdir(parents=True, exist_ok=True)
             if source is not None:
                 shutil.copyfile(source / name, staged)
             else:
-                url = f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/{name}"
+                url = f"https://huggingface.co/{repo}/resolve/{revision}/{name}"
                 with urllib.request.urlopen(url, timeout=120) as resp, staged.open("wb") as out:
                     shutil.copyfileobj(resp, out)
             actual = _sha256(staged)
             if actual != expected:
                 raise ValueError(f"Checksum mismatch for {name}: {actual}")
-        for name in MODEL_FILES:
+        for name in files:
             dest = target / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(Path(tmp) / name), dest)

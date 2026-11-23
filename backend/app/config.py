@@ -16,14 +16,23 @@ def default_data_root() -> Path:
     return (Path.home() / "PlainMarkData").resolve()
 
 
-def ocr_model_dir() -> Path:
-    """OpenThai OCR model + runtime, kept outside the repo (installed by `python -m app.ocr`)."""
-    env_dir = os.environ.get("PLAINMARK_OCR_MODEL_DIR", "").strip()
+def _model_dir(env_var: str, name: str) -> Path:
+    env_dir = os.environ.get(env_var, "").strip()
     if env_dir:
         return Path(env_dir).expanduser().resolve()
     base = os.environ.get("LOCALAPPDATA", "").strip()
     root = Path(base) / "PlainMark" if base else Path.home() / ".plainmark"
-    return (root / "models" / "openthai-ocr-text").resolve()
+    return (root / "models" / name).resolve()
+
+
+def ocr_model_dir() -> Path:
+    """OpenThai OCR model + runtime, kept outside the repo (installed by `python -m app.ocr`)."""
+    return _model_dir("PLAINMARK_OCR_MODEL_DIR", "openthai-ocr-text")
+
+
+def diarize_model_dir() -> Path:
+    """Nemotron 3 Diarization ONNX, kept outside the repo (installed by `python -m app.diarize`)."""
+    return _model_dir("PLAINMARK_DIARIZE_MODEL_DIR", "nemotron3-diarization")
 
 
 def repo_root() -> Path:
