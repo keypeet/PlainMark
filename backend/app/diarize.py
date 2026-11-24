@@ -29,7 +29,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import config, ocr
+from . import config, ocr, voiceprint
 
 MODEL_REPO = "onnx-community/Nemotron-3-Diarization-ONNX"
 MODEL_REVISION = "353b6f8ad2cac3580e982d7fbdf0a010786b0406"
@@ -418,6 +418,13 @@ def diarize_video(video: Path, audio_track: int = 0, mic_track: int | None = Non
         me = find_me(turns, mic_active(load_audio(video, mic_track)))
     for s in speakers:
         s["isMe"] = s["id"] == me
+    voiceprints = "unavailable"
+    if voiceprint.model_ready():
+        embeddings = voiceprint.speaker_embeddings(audio, turns, [s["id"] for s in speakers])
+        for s in speakers:
+            if s["id"] in embeddings:
+                s["embedding"] = embeddings[s["id"]]
+        voiceprints = "done"
     return {
         "status": "done",
         "model": f"{MODEL_NAME}@{MODEL_REVISION[:8]}",
@@ -425,6 +432,7 @@ def diarize_video(video: Path, audio_track: int = 0, mic_track: int | None = Non
         "micTrack": (mic_track + 1) if mic_track is not None and mic_track < tracks else None,
         "durationSec": round(duration, 1),
         "elapsedSec": round(time.perf_counter() - started, 1),
+        "voiceprints": voiceprints,
         "speakers": speakers,
         "turns": turns,
     }

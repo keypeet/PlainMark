@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import backup, config, diarize, ocr, wordseg
+from . import backup, config, diarize, ocr, voiceprint, wordseg
 from .storage import WorkspaceStorage
 
 
@@ -131,6 +131,12 @@ class DiarizeBody(BaseModel):
     micTrack: int | None = Field(default=None, ge=1)
 
 
+class NameSpeakerBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    remember: bool = False
+    voiceprintId: str | None = None
+
+
 class RenameSpeakerBody(BaseModel):
     oldSpeakerId: str = Field(min_length=1)
     newName: str = Field(min_length=1)
@@ -167,6 +173,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "legacyNotesPath": str(legacy_dir),
             "ocrModelReady": ocr.model_ready(),
             "diarizeModelReady": diarize.model_ready(),
+            "voiceprintModelReady": voiceprint.model_ready(),
             "modules": {
                 "notes": "ready",
                 "scratches": "ready",
@@ -614,6 +621,21 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             return storage.get_meeting_diarization(meeting_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Meeting not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/meetings/{meeting_id}/diarization/speakers/{speaker_id}")
+    def name_meeting_speaker(meeting_id: str, speaker_id: str, body: NameSpeakerBody) -> dict:
+        try:
+            return storage.name_meeting_speaker(
+                meeting_id,
+                speaker_id,
+                body.name,
+                remember=body.remember,
+                voiceprint_id=body.voiceprintId,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting or speaker not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

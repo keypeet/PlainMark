@@ -35,6 +35,11 @@ def diarize_model_dir() -> Path:
     return _model_dir("PLAINMARK_DIARIZE_MODEL_DIR", "nemotron3-diarization")
 
 
+def voiceprint_model_dir() -> Path:
+    """WeSpeaker embedding ONNX, kept outside the repo (installed by `python -m app.voiceprint`)."""
+    return _model_dir("PLAINMARK_VOICEPRINT_MODEL_DIR", "wespeaker-resnet34")
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 

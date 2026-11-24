@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import db, diarize, ocr, privacy
+from . import db, diarize, ocr, privacy, voiceprint
 
 NOTE_EXT = ".md"
 HISTORY_DIR = ".history"
@@ -1411,7 +1411,58 @@ class WorkspaceStorage:
             return {"status": "none"}
         if data.get("status") == "running" and not diarize.is_running(meeting_id):
             return {"status": "failed", "error": "Interrupted: the app stopped while it ran"}
-        return data
+        # embeddings stay on disk; the page only needs to know a voiceprint can be saved
+        speakers = []
+        for sp in data.get("speakers") or []:
+            sp = dict(sp)
+            sp["canRemember"] = bool(sp.pop("embedding", None))
+            speakers.append(sp)
+        return {**data, "speakers": speakers} if "speakers" in data else data
+
+    def name_meeting_speaker(
+        self,
+        meeting_id: str,
+        speaker_id: str,
+        name: str,
+        *,
+        remember: bool = False,
+        voiceprint_id: str | None = None,
+    ) -> dict:
+        """Name a diarized speaker; with remember, save or sharpen their voiceprint."""
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Name is required")
+        with self._op_lock:
+            _, mdir = self._find_meeting_dir(meeting_id)
+            data = _read_json(mdir / DIARIZATION_FILE, None)
+            if not isinstance(data, dict) or data.get("status") != "done":
+                raise ValueError("Run speaker diarization first")
+            speakers = data.get("speakers") or []
+            speaker = next((sp for sp in speakers if sp.get("id") == speaker_id), None)
+            if speaker is None:
+                raise FileNotFoundError(speaker_id)
+            speaker["name"] = name
+            for key in ("suggestedVoiceprintId", "suggestedName"):
+                speaker.pop(key, None)
+            target_id = voiceprint_id or speaker.get("voiceprintId")
+            if remember:
+                embedding = speaker.get("embedding")
+                if not embedding:
+                    raise ValueError("No voice sample for this speaker")
+                known = self._list_voiceprints_unlocked()
+                existing = next((vp for vp in known if vp.get("id") == target_id), None)
+                samples = int(existing.get("samples") or 0) if existing else 0
+                old = existing.get("embedding") if existing else []
+                merged = voiceprint.merge_embedding(old, samples, embedding)
+                record = self._upsert_voiceprint_unlocked(
+                    {"name": name, "embedding": merged, "samples": samples + 1},
+                    vp_id=existing["id"] if existing else None,
+                )
+                speaker["voiceprintId"] = record["id"]
+            elif voiceprint_id is None:
+                speaker.pop("voiceprintId", None)  # named for this meeting only
+            _atomic_write_json(mdir / DIARIZATION_FILE, data)
+        return self.get_meeting_diarization(meeting_id)
 
     def start_meeting_diarization(
         self,
@@ -1443,6 +1494,7 @@ class WorkspaceStorage:
             try:
                 try:
                     result = diarize.diarize_video(video, audio_track, mic_track)
+                    voiceprint.match_speakers(result.get("speakers") or [], self.list_voiceprints())
                 except diarize.DiarizeUnavailable as exc:
                     result = {"status": "unavailable", "error": str(exc)}
                 except subprocess.CalledProcessError as exc:
@@ -1595,40 +1647,47 @@ class WorkspaceStorage:
 
     def list_voiceprints(self) -> list[dict]:
         with self._op_lock:
-            self.voiceprints_root.mkdir(parents=True, exist_ok=True)
-            items: list[dict] = []
-            for entry in self.voiceprints_root.iterdir():
-                if not entry.is_file() or entry.suffix.lower() != ".json":
-                    continue
-                data = _read_json(entry, None)
-                if isinstance(data, dict):
-                    items.append(data)
-            items.sort(key=lambda v: str(v.get("name") or "").lower())
-            return items
+            return self._list_voiceprints_unlocked()
+
+    def _list_voiceprints_unlocked(self) -> list[dict]:
+        self.voiceprints_root.mkdir(parents=True, exist_ok=True)
+        items: list[dict] = []
+        for entry in self.voiceprints_root.iterdir():
+            if not entry.is_file() or entry.suffix.lower() != ".json":
+                continue
+            data = _read_json(entry, None)
+            if isinstance(data, dict):
+                items.append(data)
+        items.sort(key=lambda v: str(v.get("name") or "").lower())
+        return items
 
     def upsert_voiceprint(self, payload: dict, *, vp_id: str | None = None) -> dict:
         with self._op_lock:
-            if "audio" in payload or "audioBytes" in payload or "wav" in payload:
-                raise ValueError("Voiceprints store embeddings only; raw audio is forbidden")
-            self.voiceprints_root.mkdir(parents=True, exist_ok=True)
-            vid = sanitize_name(vp_id or payload.get("id") or f"vp-{uuid.uuid4().hex[:8]}", "vp")
-            target = self.voiceprints_root / f"{vid}.json"
-            existing = _read_json(target, {})
-            if not isinstance(existing, dict):
-                existing = {}
-            now = _now_ms()
-            record = {
-                "id": vid,
-                "name": payload.get("name", existing.get("name", "ไม่ทราบชื่อ")),
-                "nickname": payload.get("nickname", existing.get("nickname", "")),
-                "email": payload.get("email", existing.get("email", "")),
-                "embedding": list(payload.get("embedding") or existing.get("embedding") or []),
-                "projects": list(payload.get("projects") or existing.get("projects") or []),
-                "createdAt": existing.get("createdAt", now),
-                "updatedAt": now,
-            }
-            _atomic_write_json(target, record)
-            return record
+            return self._upsert_voiceprint_unlocked(payload, vp_id=vp_id)
+
+    def _upsert_voiceprint_unlocked(self, payload: dict, *, vp_id: str | None = None) -> dict:
+        if "audio" in payload or "audioBytes" in payload or "wav" in payload:
+            raise ValueError("Voiceprints store embeddings only; raw audio is forbidden")
+        self.voiceprints_root.mkdir(parents=True, exist_ok=True)
+        vid = sanitize_name(vp_id or payload.get("id") or f"vp-{uuid.uuid4().hex[:8]}", "vp")
+        target = self.voiceprints_root / f"{vid}.json"
+        existing = _read_json(target, {})
+        if not isinstance(existing, dict):
+            existing = {}
+        now = _now_ms()
+        record = {
+            "id": vid,
+            "name": payload.get("name", existing.get("name", "ไม่ทราบชื่อ")),
+            "nickname": payload.get("nickname", existing.get("nickname", "")),
+            "email": payload.get("email", existing.get("email", "")),
+            "embedding": list(payload.get("embedding") or existing.get("embedding") or []),
+            "samples": int(payload.get("samples", existing.get("samples", 0)) or 0),
+            "projects": list(payload.get("projects") or existing.get("projects") or []),
+            "createdAt": existing.get("createdAt", now),
+            "updatedAt": now,
+        }
+        _atomic_write_json(target, record)
+        return record
 
     def delete_voiceprint(self, vp_id: str) -> bool:
         """Forget Speaker: permanently remove voiceprint embedding file."""
