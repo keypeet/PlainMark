@@ -247,6 +247,36 @@ export interface MeetingRecord {
   updatedAt: number;
 }
 
+export interface DiarizedSpeaker {
+  id: string;
+  talkSec: number;
+  share: number;
+  isMe: boolean;
+  name?: string;
+  voiceprintId?: string;
+  matchScore?: number;
+  suggestedVoiceprintId?: string;
+  suggestedName?: string;
+  canRemember?: boolean;
+}
+
+export interface DiarizationTurn {
+  speakerId: string;
+  start: number;
+  end: number;
+}
+
+export interface MeetingDiarization {
+  status: 'none' | 'running' | 'done' | 'failed' | 'unavailable';
+  error?: string;
+  durationSec?: number;
+  elapsedSec?: number;
+  micTrack?: number | null;
+  voiceprints?: 'done' | 'unavailable';
+  speakers?: DiarizedSpeaker[];
+  turns?: DiarizationTurn[];
+}
+
 export interface MeetingHistorySnapshot {
   name: string;
   path: string;
@@ -747,6 +777,28 @@ export function apiRerunKeyframeOcr(meetingId: string, keyframeId: string): Prom
   return requestJson(
     `/api/meetings/${encodeURIComponent(meetingId)}/keyframes/${encodeURIComponent(keyframeId)}/ocr`,
     { method: 'POST' }
+  );
+}
+
+export function apiGetMeetingDiarization(meetingId: string): Promise<MeetingDiarization> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}/diarization`);
+}
+
+export function apiStartMeetingDiarization(meetingId: string): Promise<MeetingDiarization> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/diarize`,
+    jsonInit('POST', {})
+  );
+}
+
+export function apiNameMeetingSpeaker(
+  meetingId: string,
+  speakerId: string,
+  payload: { name: string; remember?: boolean; voiceprintId?: string }
+): Promise<MeetingDiarization> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/diarization/speakers/${encodeURIComponent(speakerId)}`,
+    jsonInit('POST', payload)
   );
 }
 

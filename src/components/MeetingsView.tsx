@@ -56,6 +56,7 @@ import {
   copyImageToClipboard,
   MeetingCapturePanel
 } from './MeetingCapturePanel';
+import { MeetingSpeakersPanel } from './MeetingSpeakersPanel';
 
 interface MeetingsViewProps {
   onNotice: (msg: string) => void;
@@ -97,7 +98,7 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [rightWidth, setRightWidth] = useState(360);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [rightTab, setRightTab] = useState<'summary' | 'slides'>('summary');
+  const [rightTab, setRightTab] = useState<'summary' | 'slides' | 'speakers'>('summary');
   const [lightboxSlide, setLightboxSlide] = useState<MeetingKeyframe | null>(null);
   const [editingSegIdx, setEditingSegIdx] = useState<number | null>(null);
   const [editingSegText, setEditingSegText] = useState('');
@@ -724,10 +725,28 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
                         สไลด์ ({keyframes.length})
                       </button>
                     )}
+                    {hasVideo && (
+                      <button
+                        type="button"
+                        className={rightTab === 'speakers' ? 'active' : ''}
+                        onClick={() => setRightTab('speakers')}
+                      >
+                        ผู้พูด
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {rightTab === 'summary' ? (
+                {rightTab === 'speakers' && hasVideo ? (
+                  <MeetingSpeakersPanel
+                    key={selectedMeeting.id}
+                    meetingId={selectedMeeting.id}
+                    videoRef={videoRef}
+                    voiceprints={voiceprints}
+                    onVoiceprintsChange={() => void loadSupporting()}
+                    onNotice={onNotice}
+                  />
+                ) : rightTab === 'summary' || (rightTab === 'speakers' && !hasVideo) ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div>
                       <strong style={{ fontSize: 13 }}>สรุปสาระสำคัญ</strong>
