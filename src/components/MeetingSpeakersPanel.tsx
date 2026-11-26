@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Loader2, Mic, Play, RefreshCw, Users } from 'lucide-react';
 import {
   apiDeleteVoiceprint,
@@ -17,6 +17,8 @@ interface MeetingSpeakersPanelProps {
   videoRef: RefObject<HTMLVideoElement>;
   voiceprints: VoiceprintItem[];
   onVoiceprintsChange: () => void;
+  /** Speakers were found again or renamed, so transcript labels changed. */
+  onSpeakersChange?: () => void;
   onNotice: (msg: string) => void;
 }
 
@@ -52,6 +54,7 @@ export function MeetingSpeakersPanel({
   videoRef,
   voiceprints,
   onVoiceprintsChange,
+  onSpeakersChange,
   onNotice
 }: MeetingSpeakersPanelProps) {
   const [state, setState] = useState<MeetingDiarization | null>(null);
@@ -59,6 +62,7 @@ export function MeetingSpeakersPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [nameValue, setNameValue] = useState('');
   const [remember, setRemember] = useState(false);
+  const wasRunning = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,10 +77,15 @@ export function MeetingSpeakersPanel({
   }, [load]);
 
   useEffect(() => {
-    if (state?.status !== 'running') return;
+    if (state?.status !== 'running') {
+      if (wasRunning.current && state?.status === 'done') onSpeakersChange?.();
+      wasRunning.current = false;
+      return;
+    }
+    wasRunning.current = true;
     const timer = window.setTimeout(() => void load(), POLL_MS);
     return () => window.clearTimeout(timer);
-  }, [state, load]);
+  }, [state, load, onSpeakersChange]);
 
   const start = async () => {
     const named = (state?.speakers || []).some((s) => s.name && !s.voiceprintId);
@@ -100,6 +109,7 @@ export function MeetingSpeakersPanel({
       setState(await apiNameMeetingSpeaker(meetingId, speakerId, payload));
       setEditingId(null);
       if (payload.remember) onVoiceprintsChange();
+      onSpeakersChange?.();
     } catch (err) {
       onNotice(err instanceof Error ? err.message : 'บันทึกชื่อไม่สำเร็จ');
     } finally {

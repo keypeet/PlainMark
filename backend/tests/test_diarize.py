@@ -158,3 +158,69 @@ def test_install_refuses_model_files_with_wrong_checksum(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="Checksum mismatch"):
         diarize.install(tmp_path / "models", source)
     assert not diarize.model_ready(tmp_path / "models")
+
+
+def test_segments_get_the_speaker_who_talks_most_during_them() -> None:
+    turns = [
+        {"speakerId": "spk1", "start": 0.0, "end": 6.0},
+        {"speakerId": "spk2", "start": 5.0, "end": 12.0},
+    ]
+    segments = [
+        {"start": 0.5, "end": 4.0, "text": "a", "speakerName": "old"},
+        {"start": 4.0, "end": 11.0, "text": "b"},  # spk1 2 s, spk2 6 s
+        {"start": 20.0, "end": 22.0, "text": "c", "speakerId": "spk1"},  # nobody talks here
+        {"text": "typed by hand", "speaker": "Bo"},
+    ]
+    out = diarize.assign_speakers(segments, turns)
+    assert out == [
+        {"start": 0.5, "end": 4.0, "text": "a", "speakerId": "spk1"},
+        {"start": 4.0, "end": 11.0, "text": "b", "speakerId": "spk2"},
+        {"start": 20.0, "end": 22.0, "text": "c"},
+        {"text": "typed by hand", "speaker": "Bo"},
+    ]
+
+
+def fake_diarization(_path: Path, _audio: int, _mic: int | None) -> dict:
+    return {
+        "status": "done",
+        "speakers": [
+            {"id": "spk1", "talkSec": 8.0, "share": 0.8, "isMe": False},
+            {"id": "spk2", "talkSec": 2.0, "share": 0.2, "isMe": True},
+        ],
+        "turns": [
+            {"speakerId": "spk1", "start": 0.0, "end": 8.0},
+            {"speakerId": "spk2", "start": 8.0, "end": 10.0},
+        ],
+    }
+
+
+def test_diarization_labels_an_existing_transcript_and_names_follow_the_speakers_tab(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, mid, video = setup(tmp_path)
+    client.patch(f"/api/meetings/{mid}", json={"videoPath": str(video)})
+    segments = [{"start": 1.0, "end": 3.0, "text": "a"}, {"start": 8.2, "end": 9.5, "text": "b"}]
+    client.put(f"/api/meetings/{mid}/transcript", json={"segments": segments})
+
+    monkeypatch.setattr(diarize, "diarize_video", fake_diarization)
+    client.post(f"/api/meetings/{mid}/diarize")
+    assert wait_done(client, mid)["status"] == "done"
+    got = client.get(f"/api/meetings/{mid}").json()["segments"]
+    assert [(s["speakerId"], s["speakerName"]) for s in got] == [
+        ("spk1", "ผู้พูด 1"),
+        ("spk2", "ผู้พูด 2"),
+    ]
+
+    client.post(f"/api/meetings/{mid}/diarization/speakers/spk1", json={"name": "Bo"})
+    got = client.get(f"/api/meetings/{mid}").json()["segments"]
+    assert got[0]["speakerName"] == "Bo"
+
+    # renaming from the transcript names the diarized speaker, so both places agree
+    client.post(
+        f"/api/meetings/{mid}/rename-speaker",
+        json={"oldSpeakerId": "spk2", "newName": "Mai"},
+    )
+    speakers = client.get(f"/api/meetings/{mid}/diarization").json()["speakers"]
+    names = {s["id"]: s.get("name") for s in speakers}
+    assert names == {"spk1": "Bo", "spk2": "Mai"}
+    assert client.get(f"/api/meetings/{mid}").json()["segments"][1]["speakerName"] == "Mai"

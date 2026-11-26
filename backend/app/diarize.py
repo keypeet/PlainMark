@@ -438,6 +438,35 @@ def diarize_video(video: Path, audio_track: int = 0, mic_track: int | None = Non
     }
 
 
+def assign_speakers(segments: list[dict], turns: list[dict]) -> list[dict]:
+    """Give each timed transcript segment the speaker who talks most during it.
+
+    Old labels on timed segments are dropped (no overlapping turn: no speaker);
+    untimed segments are left as they are.
+    """
+    out = []
+    for seg in segments:
+        a, b = seg.get("start"), seg.get("end")
+        if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+            out.append(seg)
+            continue
+        talk: dict[str, float] = {}
+        for t in turns:
+            overlap = min(b, t["end"]) - max(a, t["start"])
+            if overlap > 0:
+                talk[t["speakerId"]] = talk.get(t["speakerId"], 0.0) + overlap
+        s = {k: v for k, v in seg.items() if k not in ("speakerId", "speakerName", "speaker")}
+        if talk:
+            s["speakerId"] = max(talk, key=talk.get)
+        out.append(s)
+    return out
+
+
+def speaker_labels(speakers: list[dict]) -> dict[str, str]:
+    """Display name per speaker id, as the Speakers tab shows it."""
+    return {sp["id"]: sp.get("name") or f"ผู้พูด {i + 1}" for i, sp in enumerate(speakers)}
+
+
 def try_start(meeting_id: str) -> bool:
     """Reserve the single diarization slot (a run uses every CPU core); False if one is running."""
     with _run_lock:

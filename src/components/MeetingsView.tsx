@@ -106,6 +106,8 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   const [renameSpeakerId, setRenameSpeakerId] = useState<string | null>(null);
   const [renameSpeakerValue, setRenameSpeakerValue] = useState('');
   const [inlineFeedback, setInlineFeedback] = useState('');
+  // bumped when the transcript renames a speaker, so the Speakers tab reloads the name
+  const [speakersVersion, setSpeakersVersion] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Modals
@@ -251,18 +253,24 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
   };
 
   const selectedId = selectedMeeting?.id;
-  const reloadTranscript = useCallback(async () => {
-    if (!selectedId) return;
+  const reloadMeeting = useCallback(async (): Promise<MeetingRecord | null> => {
+    if (!selectedId) return null;
     try {
       const full = await apiGetMeeting(selectedId);
       setSelectedMeeting((cur) => (cur?.id === selectedId ? full : cur));
       const hist = await apiListMeetingHistory(selectedId).catch(() => ({ snapshots: [] }));
       setHistorySnapshots(hist.snapshots || []);
-      onNotice(`ถอดเสียงเสร็จ ได้ ${full.segments?.length || 0} ช่วง`);
+      return full;
     } catch {
       onNotice('โหลดข้อความถอดความไม่สำเร็จ');
+      return null;
     }
   }, [selectedId, onNotice]);
+  const reloadTranscript = useCallback(async () => {
+    const full = await reloadMeeting();
+    if (full) onNotice(`ถอดเสียงเสร็จ ได้ ${full.segments?.length || 0} ช่วง`);
+  }, [reloadMeeting, onNotice]);
+  const reloadSpeakers = useCallback(() => void reloadMeeting(), [reloadMeeting]);
 
   const handleSaveSegment = async (idx: number) => {
     if (!selectedMeeting) return;
@@ -292,6 +300,7 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
       setRenameSpeakerId(null);
       setRenameSpeakerValue('');
       setInlineFeedback('เปลี่ยนชื่อผู้พูดและบันทึก snapshot แล้ว');
+      setSpeakersVersion((v) => v + 1);
       const hist = await apiListMeetingHistory(selectedMeeting.id).catch(() => ({ snapshots: [] }));
       setHistorySnapshots(hist.snapshots || []);
     } catch {
@@ -766,11 +775,12 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
 
                 {rightTab === 'speakers' && hasVideo ? (
                   <MeetingSpeakersPanel
-                    key={selectedMeeting.id}
+                    key={`${selectedMeeting.id}-${speakersVersion}`}
                     meetingId={selectedMeeting.id}
                     videoRef={videoRef}
                     voiceprints={voiceprints}
                     onVoiceprintsChange={() => void loadSupporting()}
+                    onSpeakersChange={reloadSpeakers}
                     onNotice={onNotice}
                   />
                 ) : rightTab === 'summary' || (rightTab === 'speakers' && !hasVideo) ? (

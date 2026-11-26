@@ -1237,7 +1237,38 @@ class WorkspaceStorage:
             raise FileNotFoundError(meeting_id)
         transcript = _read_json(mdir / "transcript.json", {"segments": []})
         segments = transcript.get("segments", []) if isinstance(transcript, dict) else []
-        return {**meta, "segments": segments}
+        return {**meta, "segments": self._name_segment_speakers(mdir, segments)}
+
+    def _diarized_speakers(self, mdir: Path) -> tuple[list[dict], list[dict]] | None:
+        data = _read_json(mdir / DIARIZATION_FILE, None)
+        if not isinstance(data, dict) or data.get("status") != "done":
+            return None
+        return list(data.get("speakers") or []), list(data.get("turns") or [])
+
+    def _name_segment_speakers(self, mdir: Path, segments: list[dict]) -> list[dict]:
+        """Fill speakerName from the Speakers tab, so a name given there shows everywhere."""
+        diarized = self._diarized_speakers(mdir)
+        if not diarized:
+            return segments
+        labels = diarize.speaker_labels(diarized[0])
+        return [
+            {**seg, "speakerName": labels[seg["speakerId"]]}
+            if seg.get("speakerId") in labels
+            else seg
+            for seg in segments
+        ]
+
+    def _assign_transcript_speakers(self, mdir: Path) -> None:
+        """Label transcript segments with diarized speakers (call with _op_lock held)."""
+        diarized = self._diarized_speakers(mdir)
+        transcript = _read_json(mdir / "transcript.json", {"segments": []})
+        segments = transcript.get("segments", []) if isinstance(transcript, dict) else []
+        if not diarized or not segments:
+            return
+        labeled = diarize.assign_speakers(segments, diarized[1])
+        if labeled != segments:
+            self._snapshot_transcript_history(mdir, "speakers")
+            _atomic_write_json(mdir / "transcript.json", {"segments": labeled})
 
     def update_meeting(self, meeting_id: str, patch: dict) -> dict:
         with self._op_lock:
@@ -1510,6 +1541,7 @@ class WorkspaceStorage:
                     except (FileNotFoundError, ValueError):
                         return  # the meeting was deleted while it ran
                     _atomic_write_json(current / DIARIZATION_FILE, result)
+                    self._assign_transcript_speakers(current)
             finally:
                 diarize.finish(meeting_id)
 
@@ -1578,6 +1610,7 @@ class WorkspaceStorage:
                     if segments is not None:
                         self._snapshot_transcript_history(current, "asr")
                         _atomic_write_json(current / "transcript.json", {"segments": segments})
+                        self._assign_transcript_speakers(current)
                     _atomic_write_json(current / ASR_FILE, result)
             finally:
                 asr.finish(meeting_id)
@@ -1667,6 +1700,11 @@ class WorkspaceStorage:
     ) -> dict:
         with self._op_lock:
             scope, mdir = self._find_meeting_dir(meeting_id)
+            diarized = self._diarized_speakers(mdir)
+            if diarized and any(sp.get("id") == old_speaker_id for sp in diarized[0]):
+                # one name per diarized speaker: the Speakers tab and the transcript share it
+                self.name_meeting_speaker(meeting_id, old_speaker_id, new_name)
+                return self.get_meeting(meeting_id)
             self._snapshot_transcript_history(mdir, "rename-speaker")
             transcript = _read_json(mdir / "transcript.json", {"segments": []})
             segments = transcript.get("segments", []) if isinstance(transcript, dict) else []

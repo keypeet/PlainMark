@@ -35,13 +35,18 @@ function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
   return fetchMock;
 }
 
-function renderPanel(voiceprints: VoiceprintItem[] = [], onVoiceprintsChange = vi.fn()) {
+function renderPanel(
+  voiceprints: VoiceprintItem[] = [],
+  onVoiceprintsChange = vi.fn(),
+  onSpeakersChange = vi.fn()
+) {
   render(
     <MeetingSpeakersPanel
       meetingId="mtg-1"
       videoRef={createRef<HTMLVideoElement>()}
       voiceprints={voiceprints}
       onVoiceprintsChange={onVoiceprintsChange}
+      onSpeakersChange={onSpeakersChange}
       onNotice={vi.fn()}
     />
   );
@@ -116,6 +121,17 @@ describe('MeetingSpeakersPanel', () => {
     expect(String(post?.[0])).toContain('/diarization/speakers/spk1');
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: 'Ann', remember: false });
     expect(onVoiceprintsChange).not.toHaveBeenCalled();
+  });
+
+  it('tells the page to reload transcript labels after naming a speaker', async () => {
+    stubFetch(() => done);
+    const onSpeakersChange = vi.fn();
+    renderPanel([], vi.fn(), onSpeakersChange);
+    await screen.findByTestId('speaker-spk1');
+    fireEvent.click(screen.getAllByRole('button', { name: 'ตั้งชื่อ' })[0]);
+    fireEvent.change(screen.getByLabelText('ชื่อผู้พูด'), { target: { value: 'Ann' } });
+    fireEvent.click(screen.getByRole('button', { name: 'บันทึก' }));
+    await waitFor(() => expect(onSpeakersChange).toHaveBeenCalledTimes(1));
   });
 
   it('offers Forget only for a speaker whose voiceprint is saved', async () => {

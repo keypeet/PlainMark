@@ -133,6 +133,29 @@ def test_api_transcribes_in_background_and_replaces_the_transcript(
     assert any("asr" in h["name"] for h in history["snapshots"])
 
 
+def test_a_new_transcript_is_labelled_with_speakers_found_earlier(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, mid, video = setup(tmp_path)
+    client.patch(f"/api/meetings/{mid}", json={"videoPath": str(video)})
+    mdir = next((tmp_path / "PlainMarkData").rglob(f"{mid}/meeting.json")).parent
+    diarization = {
+        "status": "done",
+        "speakers": [{"id": "spk1", "name": "Bo", "talkSec": 5.0, "share": 1.0, "isMe": False}],
+        "turns": [{"speakerId": "spk1", "start": 0.0, "end": 5.0}],
+    }
+    (mdir / "diarization.json").write_text(json.dumps(diarization), encoding="utf-8")
+
+    def fake(_path: Path, _track: int, _progress) -> dict:
+        return {"status": "done", "segments": [{"start": 1.0, "end": 4.0, "text": "สวัสดี"}]}
+
+    monkeypatch.setattr(asr, "transcribe_video", fake)
+    client.post(f"/api/meetings/{mid}/transcribe")
+    assert wait_done(client, mid)["status"] == "done"
+    seg = client.get(f"/api/meetings/{mid}").json()["segments"][0]
+    assert (seg["speakerId"], seg["speakerName"]) == ("spk1", "Bo")
+
+
 def test_failures_keep_the_transcript_and_only_one_run_at_a_time(
     tmp_path: Path, monkeypatch
 ) -> None:
