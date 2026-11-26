@@ -40,6 +40,11 @@ def voiceprint_model_dir() -> Path:
     return _model_dir("PLAINMARK_VOICEPRINT_MODEL_DIR", "wespeaker-resnet34")
 
 
+def asr_model_dir() -> Path:
+    """Whisper turbo OpenVINO IR + Silero VAD, kept outside the repo (`python -m app.asr`)."""
+    return _model_dir("PLAINMARK_ASR_MODEL_DIR", "whisper-large-v3-turbo")
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import backup, config, diarize, ocr, voiceprint, wordseg
+from . import asr, backup, config, diarize, ocr, voiceprint, wordseg
 from .storage import WorkspaceStorage
 
 
@@ -131,6 +131,10 @@ class DiarizeBody(BaseModel):
     micTrack: int | None = Field(default=None, ge=1)
 
 
+class AsrBody(BaseModel):
+    audioTrack: int = Field(default=1, ge=1)
+
+
 class NameSpeakerBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     remember: bool = False
@@ -174,6 +178,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             "ocrModelReady": ocr.model_ready(),
             "diarizeModelReady": diarize.model_ready(),
             "voiceprintModelReady": voiceprint.model_ready(),
+            "asrModelReady": asr.model_ready(),
             "modules": {
                 "notes": "ready",
                 "scratches": "ready",
@@ -619,6 +624,25 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     def get_meeting_diarization(meeting_id: str) -> dict:
         try:
             return storage.get_meeting_diarization(meeting_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/meetings/{meeting_id}/transcribe")
+    def start_meeting_asr(meeting_id: str, body: AsrBody | None = None) -> dict:
+        body = body or AsrBody()
+        try:
+            return storage.start_meeting_asr(meeting_id, body.audioTrack - 1)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Meeting not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/meetings/{meeting_id}/asr")
+    def get_meeting_asr(meeting_id: str) -> dict:
+        try:
+            return storage.get_meeting_asr(meeting_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Meeting not found") from exc
         except ValueError as exc:

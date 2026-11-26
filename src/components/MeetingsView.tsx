@@ -57,6 +57,7 @@ import {
   MeetingCapturePanel
 } from './MeetingCapturePanel';
 import { MeetingSpeakersPanel } from './MeetingSpeakersPanel';
+import { MeetingTranscribeControl } from './MeetingTranscribeControl';
 
 interface MeetingsViewProps {
   onNotice: (msg: string) => void;
@@ -248,6 +249,20 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   };
+
+  const selectedId = selectedMeeting?.id;
+  const reloadTranscript = useCallback(async () => {
+    if (!selectedId) return;
+    try {
+      const full = await apiGetMeeting(selectedId);
+      setSelectedMeeting((cur) => (cur?.id === selectedId ? full : cur));
+      const hist = await apiListMeetingHistory(selectedId).catch(() => ({ snapshots: [] }));
+      setHistorySnapshots(hist.snapshots || []);
+      onNotice(`ถอดเสียงเสร็จ ได้ ${full.segments?.length || 0} ช่วง`);
+    } catch {
+      onNotice('โหลดข้อความถอดความไม่สำเร็จ');
+    }
+  }, [selectedId, onNotice]);
 
   const handleSaveSegment = async (idx: number) => {
     if (!selectedMeeting) return;
@@ -568,13 +583,22 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
           <div className="meetings-card-pane">
             <div className="sticky-board-header">
               <strong>ถอดความ &amp; ผู้พูด ({selectedMeeting.segments?.length || 0} ช่วง)</strong>
-              <button
-                type="button"
-                className="v5-btn"
-                onClick={() => setShowHistory((s) => !s)}
-              >
-                <History size={13} /> ประวัติแก้ไข ({historySnapshots.length})
-              </button>
+              <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                <MeetingTranscribeControl
+                  meetingId={selectedMeeting.id}
+                  hasVideo={hasVideo}
+                  hasTranscript={(selectedMeeting.segments?.length || 0) > 0}
+                  onTranscribed={reloadTranscript}
+                  onNotice={onNotice}
+                />
+                <button
+                  type="button"
+                  className="v5-btn"
+                  onClick={() => setShowHistory((s) => !s)}
+                >
+                  <History size={13} /> ประวัติแก้ไข ({historySnapshots.length})
+                </button>
+              </span>
             </div>
 
             {showHistory && (
@@ -598,17 +622,20 @@ export function MeetingsView({ onNotice }: MeetingsViewProps) {
 
             {(selectedMeeting.segments?.length || 0) === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>
-                ยังไม่มีข้อความถอดความ — รองรับการเชื่อมต่อ ASR ใน Phase 2
+                {hasVideo
+                  ? 'ยังไม่มีข้อความถอดความ กด "ถอดเสียง" เพื่อถอดจากวิดีโอที่ลิงก์ไว้'
+                  : 'ยังไม่มีข้อความถอดความ ลิงก์วิดีโอประชุมก่อนจึงจะถอดเสียงได้'}
               </p>
             ) : (
               <div className="meetings-transcript-list">
                 {selectedMeeting.segments!.map((seg, idx) => {
+                  const hasSpeaker = !!(seg.speakerId || seg.speakerName || seg.speaker);
                   const spkId = seg.speakerId || seg.speaker || 'spk_0';
                   const spkLabel = seg.speakerName || seg.speaker || spkId;
                   return (
                     <div key={seg.id || idx} className="transcript-seg-row">
                       <div className="transcript-seg-head">
-                        {renameSpeakerId === spkId ? (
+                        {!hasSpeaker ? null : renameSpeakerId === spkId ? (
                           <span style={{ display: 'inline-flex', gap: 4 }}>
                             <input
                               className="settings-input"

@@ -2226,6 +2226,13 @@ button.keyframe-16x9 {
   font-size: 13px;
 }
 
+.asr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
 .speakers-summary {
   justify-content: space-between;
   font-size: 12.5px;

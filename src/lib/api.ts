@@ -277,6 +277,17 @@ export interface MeetingDiarization {
   turns?: DiarizationTurn[];
 }
 
+export interface MeetingAsr {
+  status: 'none' | 'running' | 'done' | 'failed' | 'unavailable';
+  error?: string;
+  device?: string;
+  durationSec?: number;
+  elapsedSec?: number;
+  segmentCount?: number;
+  piecesDone?: number;
+  pieces?: number;
+}
+
 export interface MeetingHistorySnapshot {
   name: string;
   path: string;
@@ -787,6 +798,17 @@ export function apiGetMeetingDiarization(meetingId: string): Promise<MeetingDiar
 export function apiStartMeetingDiarization(meetingId: string): Promise<MeetingDiarization> {
   return requestJson(
     `/api/meetings/${encodeURIComponent(meetingId)}/diarize`,
+    jsonInit('POST', {})
+  );
+}
+
+export function apiGetMeetingAsr(meetingId: string): Promise<MeetingAsr> {
+  return requestJson(`/api/meetings/${encodeURIComponent(meetingId)}/asr`);
+}
+
+export function apiStartMeetingAsr(meetingId: string): Promise<MeetingAsr> {
+  return requestJson(
+    `/api/meetings/${encodeURIComponent(meetingId)}/transcribe`,
     jsonInit('POST', {})
   );
 }

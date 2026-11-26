@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import db, diarize, ocr, privacy, voiceprint
+from . import asr, db, diarize, ocr, privacy, voiceprint
 
 NOTE_EXT = ".md"
 HISTORY_DIR = ".history"
@@ -32,6 +32,7 @@ VOICEPRINTS_SUBDIR = "voiceprints"
 RESERVED_MEETING_DIRS = {"inbox", "broken"}
 CAPTURES_SUBDIR = "captures"
 DIARIZATION_FILE = "diarization.json"
+ASR_FILE = "asr.json"
 VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
 MEDIA_LIST_LIMIT = 300
 PNG_SIGNATURE = b"\x89PNG"
@@ -1517,6 +1518,75 @@ class WorkspaceStorage:
         else:
             job()
         return self.get_meeting_diarization(meeting_id)
+
+    # ---------- Speech to text (Whisper turbo on the GPU, one background run at a time) ----------
+
+    def get_meeting_asr(self, meeting_id: str) -> dict:
+        _, mdir = self._find_meeting_dir(meeting_id)
+        data = _read_json(mdir / ASR_FILE, None)
+        if not isinstance(data, dict):
+            return {"status": "none"}
+        if data.get("status") == "running":
+            done = asr.progress(meeting_id)
+            if done is None:
+                return {"status": "failed", "error": "Interrupted: the app stopped while it ran"}
+            return {**data, "piecesDone": done[0], "pieces": done[1]}
+        return data
+
+    def start_meeting_asr(
+        self, meeting_id: str, audio_track: int = 0, *, background: bool = True
+    ) -> dict:
+        """Transcribe the linked video into transcript.json; the old one is kept in .history."""
+        scope, mdir = self._find_meeting_dir(meeting_id)
+        meta = self._load_meeting_summary_record(scope, mdir)
+        if not meta:
+            raise FileNotFoundError(meeting_id)
+        raw = str(meta.get("videoPath") or "").strip()
+        if not raw:
+            raise ValueError("Link a video to this meeting first")
+        try:
+            video = self.resolve_media_file(raw)
+        except FileNotFoundError as exc:
+            raise ValueError("Video file not found") from exc
+        if not asr.try_start(meeting_id):
+            raise ValueError("Another transcription is already running")
+        with self._op_lock:
+            _atomic_write_json(mdir / ASR_FILE, {"status": "running", "startedAt": _now_ms()})
+
+        def job() -> None:
+            segments = None
+            try:
+                try:
+                    result = asr.transcribe_video(
+                        video, audio_track, lambda d, n: asr.set_progress(meeting_id, d, n)
+                    )
+                    segments = result.pop("segments")
+                    result["segmentCount"] = len(segments)
+                except asr.AsrUnavailable as exc:
+                    result = {"status": "unavailable", "error": str(exc)}
+                except subprocess.CalledProcessError as exc:
+                    detail = (exc.stderr or b"").decode("utf-8", "replace").strip()
+                    result = {"status": "failed", "error": detail or str(exc)}
+                except Exception as exc:  # a background run must always leave a final status
+                    result = {"status": "failed", "error": str(exc)}
+                result["finishedAt"] = _now_ms()
+                with self._op_lock:
+                    try:
+                        _, current = self._find_meeting_dir(meeting_id)
+                    except (FileNotFoundError, ValueError):
+                        return  # the meeting was deleted while it ran
+                    if segments is not None:
+                        self._snapshot_transcript_history(current, "asr")
+                        _atomic_write_json(current / "transcript.json", {"segments": segments})
+                    _atomic_write_json(current / ASR_FILE, result)
+            finally:
+                asr.finish(meeting_id)
+
+        if background:
+            threading.Thread(target=job, name=f"asr-{meeting_id}", daemon=True).start()
+        else:
+            job()
+        return self.get_meeting_asr(meeting_id)
 
     def resolve_meeting_capture(self, meeting_id: str, name: str) -> Path:
         if not CAPTURE_NAME_RE.match(name or ""):
